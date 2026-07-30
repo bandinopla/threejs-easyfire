@@ -1,0 +1,37 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"useDefineForClassFields": true,
+		"module": "ESNext",
+		"lib": [
+			"ESNext",
+			"DOM",
+			"DOM.Iterable"
+		],
+		"allowJs": true,
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"strict": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"esModuleInterop": true,
+		"noEmit": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitReturns": true,
+		"skipLibCheck": true,
+		"baseUrl": ".",
+		"paths": {
+			"threejs-easyfire": [
+				"./src/index.ts"
+			]
+		}
+	},
+	"include": [
+		"src/**/*.ts",
+		"demo/**/*.ts",
+		"vite.config.ts",
+		"vite.config.lib.ts",
+		"demo/util/DRACOLoader.js"
+	]
+}

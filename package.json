@@ -1,0 +1,30 @@
+{
+	"name": "threejs-easyfire",
+	"version": "0.1.2",
+	"main": "dist/threejs-easyfire.js",
+	"module": "dist/threejs-easyfire.js",
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@types/three": "^0.185.1",
+		"three": "^0.185.1",
+		"typescript": "^5.6.3",
+		"vite": "^8.1.4",
+		"vite-plugin-dts": "^5.0.3"
+	},
+	"peerDependencies": {
+		"three": ">=0.125.0"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"dev": "vite",
+		"build:demo": "vite build --config vite.config.ts",
+		"build:lib": "vite build --config vite.config.lib.ts",
+		"build": "bun run build:lib && bun run build:demo",
+		"preview": "vite preview"
+	},
+	"type": "module",
+	"types": "dist/threejs-easyfire.d.ts",
+	"license": "MIT"
+}

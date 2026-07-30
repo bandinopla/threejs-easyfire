@@ -1,0 +1,74 @@
+## EasyFire
+
+EasyFire is a WebGPU-based 3D volumetric fire and smoke simulation library for Three.js. It leverages Three.js Shading Language (TSL) and WebGPU compute shaders to run a real-time Eulerian fluid simulation.
+It allows to interact with the fluid using colliders made of simple shapes or using SDF shapes you define yourself! 
+
+## Key Technologies
+- **Three.js (WebGPU renderer):** Uses the latest WebGPU backend.
+- **TSL (Three.js Shading Language):** Compute and fragment shaders are written in TSL (e.g., `fn`, `vec3`, `storageTexture`, etc.), avoiding GLSL.
+- **Compute Shaders:** The entire fluid simulation runs on the GPU.
+
+## Usage Overview
+The library simulates fire/smoke on a 3D voxel grid. Emitters add "dye" and temperature/velocity to the grid. Compute passes advance the simulation, and a VolumeNodeMaterial renders the 3D texture.
+
+## Workflow
+1. install the package via npm "threejs-easyfire"
+2. import the EasyFire class from "threejs-easyfire"
+3. Instantiate the EasyFire class. It takes as arguments the webGPU renderer (because it uses to compule shaders) and an options config object.
+4. The options config have the following properties:
+   - renderLayer:string - user defined, determines the layer to be used to render the volume scene that will eventually be added on top of themain scene via post processing.
+   - size: object - contains the sizes for the grids to be used. The world grid is the boundig box size of the simulation in world units. The render resolution is the resolution of the volume texture that will be rendered. Higher values mean more detail but also more computation. It is recommended to use a render resolution that is at least twice the physics resolution. The physics resolution is the resolution of the volume texture that will be used to simulate the fire. Higher resolutions mean more accuracy but also more computation. 
+   - steps:number - steps the raymarching inside of the volume will take. More steps will look better but will slow down the machine.
+   - burnableMeshes: EmitterObjectDef[] - if you plan on "burning" meshes (meaning, cover them in fire) this is where you tell the library beforehand about the meshes so it can compute internally all the space it will need to use on the GPU. Tese represent like a prefab, a template, their vertices will be used as the source to emit fire from. You can instantiate then many times, but you must specify the max count you expect.
+   - pressureIterations:number - how many times to run the Jacobi iterations. Must be a power of 2. 
+   - blurStrength:number - sets the blur that will be applied to the render pass of the volume simulation. 0 means no blur.
+5. Place the EasyFire instance anywhere you like, the code will sync all the positions relative to it's internal local space.
+6. initialize it: await myFire.initialize(); only after this the simulation will be ready to be used. 
+7. To set something on fire what you do is to request a fire proxy object, that will contain the fire of that object. Usually you would add it to the object you want to burn so that when it moves the fire will stick to it. But this fire prox object is a simple Object3D that is internally tracked for it's transform and updated on every frame.
+   you call myFire.getFireFor("templateId", config) where templateId is the id ised on the  "burnableMeshes" config option. SO the simulation will look for that template, and return a proxy that will contain all the vertices and emit from them. You cna move this proxy around and rotate it and scale it.
+8. Add colliders: the colliders are signed distance field shapes. So they are assumed to live inside of a 1:1:1 box. When you call fireInstance.makeObjectCollidable(obj, colliderType) you pass an object that will be used internally as the bounding box of the SDF shape, so you can move it, scale it etc... but the simulation will calculate the shape to be inside of that proxy object.
+9. Add the fire pass to your render pipeline: the fire simulation offers a render pass that will contain the volumetric scene in it, you can then use that to add it on top of your scene or do posterior modifications. So on your render pass block, at some point you will call: myFire.getRenderPass(scene, camera, sceneDepth) where sceneDepth is your scene pass scenePass.getTextureNode("depth")
+10. optionally if you want to tweak the settings and see how it looks visually you can call: myFire.addSettingsToInspector(renderer.inspector as Inspector, "Easy fire"); that will add a folder on your instpector instance with all the settings for that particular instance.
+11. then in your render loop to update the fire simulation: myFireupdate(delta); that will execute the internal steps to advance the simulation and keep everything up to date so the scene objects and the simulation data are aligned.
+
+## Resolution
+The system uses 3 grids... one is the size of the bounding box in your 3d scene, in world units, where the simulation will take place. The other is the size of the render grid, in 3d voxels size, think of it like a Minecraft cube... and the physics is also a 3d texture. They are separated because visually, you can have a small physics voxel grid and it will save processing time and most likely it wont be that noticeable. They are separated so you can test what setup works best. 
+
+## Proxy objects
+the library interfaces with you via proxy objects. These are simple Object3D that you can move and animate. Once thing to have in mind, the system uses it's matrixWorld to calculate the position relative to the simulation local space and the colliders that use them to render theyr SDF shapes always assume they are a non-uniformally scaled 1:1:1 box. So the scale of the collider's proxy object is what is used to calculate the AABB of the SDF shape.
+
+## Adding SDF Shapes
+SDF shapes are classes that extend `SDFShape` abstract class. The method that does the SDF is `sdf(localPos, halfExtents)` you recieve a tsl vec3 node and the halfExtents of the shape. You must return the signed distance from the point to the surface of the shape.
+Then to plug them you do that in the config object of EasyFire on the property collisions.sdfShapes array of SDFShape class instances. They all must accept a max count and a name string. The max count is a number saying how many of this type of shapes are expected to be created, and the name is the id that will be used when you want to create a collider of this type via .makeObjectCollidable(object3d, shapeId);
+ 
+## Complex colliders
+Say you want to make a hand interact with the fire. You can attach to each finger basic colliders such as shapes or cubes to the bones of some armature, and the simulation will internally match the positions of each proxy collider object!
+
+
+
+# Info for devs
+
+## Project Structure
+
+The source code is located in the `src` directory and is structured as follows:
+
+- **Core Files:**
+  - `EasyFire.ts`: The main entry point and orchestrator. It manages the volumetric material, simulation passes, rendering logic, and exposes the public API for the fire simulation.
+  - `EasyFireShaderContext.ts`: Manages the Voxel Grid and 3D Storage Textures (`DataTexture`) used for the simulation data (velocity, dye, pressure, divergence, etc.).
+  - `EmitterManager.ts`: Handles objects/particles that emit into the fluid simulation. Uses CPU-side buffering and storage buffers for efficient data transfer to compute shaders.
+
+- **`pass/` Directory (Fluid Simulation Passes):**
+  Contains the compute shader passes that make up the fluid simulation step:
+  - `advectVelocityPass.ts` & `advectDyePass.ts`: Advection of velocity and dye (density/temperature).
+  - `curlNoisePass.ts`: Adds turbulent noise to the velocity.
+  - `divergencePass.ts`, `jacobiPass.ts`, `projectPass.ts`: Solves the pressure field and makes the velocity field divergence-free (incompressible fluid).
+  - `vorticityPass.ts`: Enhances swirling motion.
+  - `emitObjectPass.ts`: Injects velocity and dye from emitters into the grid.
+
+- **`sdf/` Directory (Collisions and Shapes):**
+  Signed Distance Field (SDF) implementations for handling collisions between the fluid and 3D objects.
+  - `CollisionHandler.ts`: Evaluates collisions.
+  - `shape/`: Primitive SDF shapes (`SDFBox`, `SDFEllipsoid`, `SDFShape`).
+
+- **`util/` Directory:**
+  Utility functions, such as `createStorage3D.ts` for creating 3D textures.

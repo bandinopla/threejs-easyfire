@@ -1086,6 +1086,9 @@ export class EasyFire extends Object3D {
 		};
 
 		const devCommands = {
+			repo() {
+				window.open("https://github.com/bandinopla/threejs-easyfire", "_blank");
+			},
 			save: () => {
 				const payload = this.getSettingsSnapshot();
 				//save to local storage
@@ -1141,6 +1144,8 @@ export class EasyFire extends Object3D {
 		const params = this.getSettingsSnapshot();
 
 		const gui = inspector.createParameters(name);
+
+		gui.add(devCommands, "repo").name("Repo");
 
 		gui.add(devCommands, "loadFromJson").name("Load from json file");
 

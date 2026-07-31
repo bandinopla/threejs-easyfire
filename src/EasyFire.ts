@@ -13,6 +13,7 @@ import {
 	Object3D,
 	PerspectiveCamera,
 	RGBAFormat,
+	RedFormat,
 	Scene,
 	SpotLight,
 	Vector2,
@@ -75,7 +76,7 @@ import {
 import { EmitterManager, EmitterObjectDef, EmitterOptions } from "./EmitterManager";
 import { createStorage3D } from "./util/createStorage3D";
 import { bayer16 } from "three/examples/jsm/tsl/math/Bayer.js";
-import { EasyFireShaderContext, NoiseTextureConfig } from "./EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext, NoiseTextureConfig } from "./EasyFireShaderContext";
 import { curlNoisePass } from "./pass/curlNoisePass";
 import { advectVelocityPass } from "./pass/advectVelocityPass";
 import { divergencePass } from "./pass/divergencePass";
@@ -193,6 +194,23 @@ export class EasyFire extends Object3D {
 	 * Data relevant to the compute shaders so they can do their thing...
 	 */
 	readonly shaderContext: EasyFireShaderContext;
+
+	/**
+	 * Textures slot mapping used in the simulation
+	 */
+	readonly textures: {
+		curlNoise: DataTexture;
+		velA: DataTexture;
+		velB: DataTexture;
+		dyeA: DataTexture;
+		dyeB: DataTexture;
+		divergence: DataTexture;
+		pressA: DataTexture;
+		pressB: DataTexture;
+		vorticity: DataTexture;
+	};
+
+	private computeShaders!: any;
 
 	public simulate: boolean = true;
 	public simulationSpeed = 2;
@@ -358,114 +376,29 @@ export class EasyFire extends Object3D {
 			collisions: this.collisions,
 		});
 
+		this.textures = {
+			curlNoise: this.shaderContext.texture.curlNoise,
+			velA: this.shaderContext.texture.vel.A,
+			velB: this.shaderContext.texture.vel.B,
+			dyeA: this.shaderContext.texture.dye.A,
+			dyeB: this.shaderContext.texture.dye.B,
+			divergence: this.shaderContext.texture.divergence,
+			pressA: this.shaderContext.texture.press.A,
+			pressB: this.shaderContext.texture.press.B,
+			vorticity: this.shaderContext.texture.vorticity,
+		};
+
 		this.vertexEmissionRadius = cfg.vertexEmissionWorldRadius;
 
-		// 1. Workgroup size per 3D block (4x4x4 = 64 threads)
-		const WORKGROUP_3D = [4, 4, 4];
-		// // 2. Number of workgroups to dispatch on X, Y, Z
-		const PHYS_DISPATCH = [
-			Math.ceil(cfg.size.physicsResolution.x / WORKGROUP_3D[0]), // 64 / 4 = 16
-			Math.ceil(cfg.size.physicsResolution.y / WORKGROUP_3D[1]), // 64 / 4 = 16
-			Math.ceil(cfg.size.physicsResolution.z / WORKGROUP_3D[2]), // 64 / 4 = 16
-		];
-		const DYE_DISPATCH = [
-			Math.ceil(cfg.size.renderResolution.x / WORKGROUP_3D[0]), // 100 / 4 = 25
-			Math.ceil(cfg.size.renderResolution.y / WORKGROUP_3D[1]), // 100 / 4 = 25
-			Math.ceil(cfg.size.renderResolution.z / WORKGROUP_3D[2]), // 100 / 4 = 25
-		];
-		const NOISE_DISPATCH = [
-			Math.ceil(cfg.noise.size / WORKGROUP_3D[0]),
-			Math.ceil(cfg.noise.size / WORKGROUP_3D[1]),
-			Math.ceil(cfg.noise.size / WORKGROUP_3D[2]),
-		];
-
-		//
-		// Simulation's shader passes
-		//
-
-		const phyGridRes = cfg.size.physicsResolution;
-		const dyeGridRes = cfg.size.renderResolution;
-
-		const inBoundsRun = (name: string, grid: Vector3Like, DISPATCH: number[], execPass: VoidFunction) => {
-			return Fn(() => {
-				const coord = globalId;
-				const gridResolution = ivec3(grid.x, grid.y, grid.z);
-				If(
-					coord.x
-						.lessThan(0)
-						.or(coord.x.greaterThanEqual(gridResolution.x))
-						.or(coord.y.lessThan(0).or(coord.y.greaterThanEqual(gridResolution.y)))
-						.or(coord.z.lessThan(0).or(coord.z.greaterThanEqual(gridResolution.z))),
-					() => {
-						Return();
-					},
-				);
-				execPass();
-			})()
-				.compute(DISPATCH as any, WORKGROUP_3D)
-				.setName(name);
-		};
-
-		const pressTexture = this.shaderContext.texture.press;
-
-		const computeShaders = {
-			vorticityPass: inBoundsRun("Vorticity", phyGridRes, PHYS_DISPATCH, vorticityPass(this.shaderContext)),
-
-			bakeColliders: inBoundsRun(
-				"Bake Colliders",
-				phyGridRes,
-				PHYS_DISPATCH,
-				this.collisions.bakeCollidersPass(this.shaderContext),
-			),
-
-			curlPassCompute: inBoundsRun(
-				"Curl Noise",
-				{ x: cfg.noise.size, y: cfg.noise.size, z: cfg.noise.size },
-				NOISE_DISPATCH,
-				curlNoisePass(this.shaderContext),
-			),
-
-			advectPassCompute: inBoundsRun(
-				"Advect Velocity",
-				phyGridRes,
-				PHYS_DISPATCH,
-				advectVelocityPass(this.shaderContext),
-			),
-
-			divPassCompute: inBoundsRun("Divergence", phyGridRes, PHYS_DISPATCH, divergencePass(this.shaderContext)),
-
-			jacobiPassABCompute: inBoundsRun(
-				"jacobiABCompute",
-				phyGridRes,
-				PHYS_DISPATCH,
-				jacobiPass(this.shaderContext, pressTexture.A, pressTexture.B),
-			),
-
-			jacobiPassBACompute: inBoundsRun(
-				"jacobiBACompute",
-				phyGridRes,
-				PHYS_DISPATCH,
-				jacobiPass(this.shaderContext, pressTexture.B, pressTexture.A),
-			),
-
-			projectCompute: inBoundsRun("Project", phyGridRes, PHYS_DISPATCH, projectPass(this.shaderContext)),
-
-			advectDyeCompute: inBoundsRun("Advect Dye", dyeGridRes, DYE_DISPATCH, advectDyePass(this.shaderContext)),
-
-			objectsPassCompute: this.objectsManager
-				.computeNodePerVertex(emitObjectPassFragment(this.shaderContext))
-				.setName("emit Ojects"),
-
-			emitObjectsVelocityAndDyePass: this.objectsManager
-				.computeNodePerVertex(emitObjectsVelocityAndDyePassFragment(this.shaderContext))
-				.setName("emitVelocityAndDye"),
-		};
-		//--------------------------------------------------------------------------------------------------------------------------
+		this.recreateComputeShaders();
 
 		// 2. Define the TSL function to take the ray position as an argument
 		// In TSL, fn() arguments are passed as an array to the callback
 		const calculateScattering = Fn(([posRay]: [Node<"vec3">]) => {
-			const { density, temperature, colorMass, bboxPosition, uvw } = this.shaderContext.sampleVolumeAt(posRay);
+			const { density, temperature, colorMass, bboxPosition, uvw } = this.shaderContext.sampleVolumeAt(posRay, {
+				velocity: this.textures.velA,
+				dye: this.textures.dyeA,
+			});
 
 			//const crispDensity = smoothstep(0.05, 0.35, density);
 			const crispDensity = pow(density, float(1.5));
@@ -536,7 +469,7 @@ export class EasyFire extends Object3D {
 				.add(0.5)
 				.toVar();
 
-			return this.shaderContext.texture.curlNoise.sample(uvw);
+			return this.textures.curlNoise.sample(uvw);
 		});
 
 		//// interesting pattern...
@@ -627,7 +560,7 @@ export class EasyFire extends Object3D {
 			}
 
 			// Precompute curl noise on the GPU
-			await renderer.computeAsync(computeShaders.curlPassCompute);
+			await renderer.computeAsync(this.computeShaders.curlPassCompute);
 
 			let frame = 0;
 			let simulationTime = 0;
@@ -645,7 +578,7 @@ export class EasyFire extends Object3D {
 				dt = Math.min(dt, 1 / 60);
 
 				if (this._curlNoiseUpdated) {
-					renderer.compute(computeShaders.curlPassCompute);
+					renderer.compute(this.computeShaders.curlPassCompute);
 					this._curlNoiseUpdated = false;
 				}
 
@@ -681,30 +614,30 @@ export class EasyFire extends Object3D {
 					this.shaderContext.uDt.value = simStep;
 
 					// // bake colliders into sdf texture
-					renderer.compute(computeShaders.bakeColliders);
+					renderer.compute(this.computeShaders.bakeColliders);
 
 					while (simAccumulator >= simStep) {
 						simulationTime += simStep;
 
 						this.shaderContext.uTime.value = simulationTime;
 
-						renderer.compute(computeShaders.vorticityPass);
+						renderer.compute(this.computeShaders.vorticityPass);
 
-						renderer.compute(computeShaders.advectPassCompute); // read vel.A(RGB) & dye.A(RGB) & curlNoise(RGB) --> vel.B(RGB)
+						renderer.compute(this.computeShaders.advectPassCompute); // read vel.A(RGB) & dye.A(RGB) & curlNoise(RGB) --> vel.B(RGB)
 
-						renderer.compute(computeShaders.divPassCompute); // read vel.B(RGB) -> divergence(R)
+						renderer.compute(this.computeShaders.divPassCompute); // read vel.B(RGB) -> divergence(R)
 
 						for (let i = 0; i < cfg.pressureIterations; i++) {
 							renderer.compute(
 								i % 2 === 0
-									? computeShaders.jacobiPassABCompute // read pressureA(R) + divergence(R) -> write pressureB(R)
-									: computeShaders.jacobiPassBACompute, // read pressureB(R) + divergence(R) -> write pressureA(R)
+									? this.computeShaders.jacobiPassABCompute // read pressureA(R) + divergence(R) -> write pressureB(R)
+									: this.computeShaders.jacobiPassBACompute, // read pressureB(R) + divergence(R) -> write pressureA(R)
 							);
 						}
 
-						renderer.compute(computeShaders.projectCompute); // read vel.B(RGB) + pressureA(R) -> vel.A(RGB)
-						renderer.compute(computeShaders.advectDyeCompute); // read: vel.A(RGB) + dye.A(RGBA) -> dye.B(RGBA)
-						renderer.compute(computeShaders.objectsPassCompute); // read: dye.A(RGBA) -> dye.B(RGBA)
+						renderer.compute(this.computeShaders.projectCompute); // read vel.B(RGB) + pressureA(R) -> vel.A(RGB)
+						renderer.compute(this.computeShaders.advectDyeCompute); // read: vel.A(RGB) + dye.A(RGBA) -> dye.B(RGBA)
+						renderer.compute(this.computeShaders.objectsPassCompute); // read: dye.A(RGBA) -> dye.B(RGBA)
 
 						this.shaderContext.texture.dye.swap();
 
@@ -1327,6 +1260,188 @@ export class EasyFire extends Object3D {
 
 		snapshotFolder.add(devCommands, "copy").name("Copy to clipboard");
 		snapshotFolder.add(devCommands, "saveToFile").name("Save to file (.json)");
+	}
+
+	private recreateComputeShaders() {
+		const cfg = this.config;
+		const WORKGROUP_3D = [4, 4, 4];
+		const PHYS_DISPATCH = [
+			Math.ceil(cfg.size.physicsResolution.x / WORKGROUP_3D[0]),
+			Math.ceil(cfg.size.physicsResolution.y / WORKGROUP_3D[1]),
+			Math.ceil(cfg.size.physicsResolution.z / WORKGROUP_3D[2]),
+		];
+		const DYE_DISPATCH = [
+			Math.ceil(cfg.size.renderResolution.x / WORKGROUP_3D[0]),
+			Math.ceil(cfg.size.renderResolution.y / WORKGROUP_3D[1]),
+			Math.ceil(cfg.size.renderResolution.z / WORKGROUP_3D[2]),
+		];
+		const NOISE_DISPATCH = [
+			Math.ceil(cfg.noise.size / WORKGROUP_3D[0]),
+			Math.ceil(cfg.noise.size / WORKGROUP_3D[1]),
+			Math.ceil(cfg.noise.size / WORKGROUP_3D[2]),
+		];
+
+		const phyGridRes = cfg.size.physicsResolution;
+		const dyeGridRes = cfg.size.renderResolution;
+
+		const inBoundsRun = (name: string, grid: Vector3Like, DISPATCH: number[], execPass: VoidFunction) => {
+			return Fn(() => {
+				const coord = globalId;
+				const gridResolution = ivec3(grid.x, grid.y, grid.z);
+				If(
+					coord.x
+						.lessThan(0)
+						.or(coord.x.greaterThanEqual(gridResolution.x))
+						.or(coord.y.lessThan(0).or(coord.y.greaterThanEqual(gridResolution.y)))
+						.or(coord.z.lessThan(0).or(coord.z.greaterThanEqual(gridResolution.z))),
+					() => {
+						Return();
+					},
+				);
+				execPass();
+			})()
+				.compute(DISPATCH as any, WORKGROUP_3D)
+				.setName(name);
+		};
+
+		this.computeShaders = {
+			vorticityPass: inBoundsRun("Vorticity", phyGridRes, PHYS_DISPATCH, vorticityPass(this.shaderContext, {
+				velocity: this.textures.velA,
+				vorticity: this.textures.vorticity,
+			})),
+
+			bakeColliders: inBoundsRun(
+				"Bake Colliders",
+				phyGridRes,
+				PHYS_DISPATCH,
+				this.collisions.bakeCollidersPass(this.shaderContext),
+			),
+
+			curlPassCompute: inBoundsRun(
+				"Curl Noise",
+				{ x: cfg.noise.size, y: cfg.noise.size, z: cfg.noise.size },
+				NOISE_DISPATCH,
+				curlNoisePass(this.shaderContext, {
+					curlNoise: this.textures.curlNoise,
+				}),
+			),
+
+			advectPassCompute: inBoundsRun(
+				"Advect Velocity",
+				phyGridRes,
+				PHYS_DISPATCH,
+				advectVelocityPass(this.shaderContext, {
+					velocity: this.textures.velA,
+					dye: this.textures.dyeA,
+					curlNoise: this.textures.curlNoise,
+					vorticity: this.textures.vorticity,
+					velocityOut: this.textures.velB,
+				}),
+			),
+
+			divPassCompute: inBoundsRun("Divergence", phyGridRes, PHYS_DISPATCH, divergencePass(this.shaderContext, {
+				velocity: this.textures.velB,
+				divergence: this.textures.divergence,
+			})),
+
+			jacobiPassABCompute: inBoundsRun(
+				"jacobiABCompute",
+				phyGridRes,
+				PHYS_DISPATCH,
+				jacobiPass(this.shaderContext, {
+					pressureIn: this.textures.pressA,
+					pressureOut: this.textures.pressB,
+					divergence: this.textures.divergence,
+				}),
+			),
+
+			jacobiPassBACompute: inBoundsRun(
+				"jacobiBACompute",
+				phyGridRes,
+				PHYS_DISPATCH,
+				jacobiPass(this.shaderContext, {
+					pressureIn: this.textures.pressB,
+					pressureOut: this.textures.pressA,
+					divergence: this.textures.divergence,
+				}),
+			),
+
+			projectCompute: inBoundsRun("Project", phyGridRes, PHYS_DISPATCH, projectPass(this.shaderContext, {
+				pressure: this.textures.pressA,
+				velocityIn: this.textures.velB,
+				velocityOut: this.textures.velA,
+			})),
+
+			advectDyeCompute: inBoundsRun("Advect Dye", dyeGridRes, DYE_DISPATCH, advectDyePass(this.shaderContext, {
+				velocity: this.textures.velA,
+				dyeIn: this.textures.dyeA,
+				dyeOut: this.textures.dyeB,
+			})),
+
+			objectsPassCompute: this.objectsManager
+				.computeNodePerVertex(emitObjectPassFragment(this.shaderContext, {
+					dyeIn: this.textures.dyeA,
+					dyeOut: this.textures.dyeB,
+				}))
+				.setName("emit Ojects"),
+
+			emitObjectsVelocityAndDyePass: this.objectsManager
+				.computeNodePerVertex(emitObjectsVelocityAndDyePassFragment(this.shaderContext, {
+					velocity: this.textures.velB,
+				}))
+				.setName("emitVelocityAndDye"),
+		};
+	}
+
+	public setRenderVoxelGridSize(width: number, height: number, depth: number) {
+		const newSize = new Vector3(width, height, depth);
+		this.config.size.renderResolution = newSize;
+
+		// 1. Create new textures
+		const newDyeA = createStorage3D("dyeA", width, height, depth);
+		const newDyeB = createStorage3D("dyeB", width, height, depth);
+
+		// 2. Assign and dispose the old textures
+		this.textures.dyeA.setTexture(newDyeA);
+		this.textures.dyeB.setTexture(newDyeB);
+
+		// 3. Update grid dimensions in shader context (which updates uniforms)
+		this.shaderContext.updateDyeGrid(newSize);
+
+		// 4. Rebuild the compute passes to match the new dispatch resolutions
+		this.recreateComputeShaders();
+	}
+
+	public setPhysicalVoxelGridSize(width: number, height: number, depth: number) {
+		const newSize = new Vector3(width, height, depth);
+		this.config.size.physicsResolution = newSize;
+
+		// 1. Create new textures
+		const newVelA = createStorage3D("velA", width, height, depth);
+		const newVelB = createStorage3D("velB", width, height, depth);
+		const newDiv = createStorage3D("divergence", width, height, depth, RedFormat);
+		const newPressA = createStorage3D("pressA", width, height, depth, RedFormat);
+		const newPressB = createStorage3D("pressB", width, height, depth, RedFormat);
+		const newVort = createStorage3D("vorticity", width, height, depth);
+
+		const newSdf = createStorage3D("sdf", width, height, depth);
+		const newSdfVel = createStorage3D("sdfVelocity", width, height, depth);
+
+		// 2. Assign and dispose the old textures
+		this.textures.velA.setTexture(newVelA);
+		this.textures.velB.setTexture(newVelB);
+		this.textures.divergence.setTexture(newDiv);
+		this.textures.pressA.setTexture(newPressA);
+		this.textures.pressB.setTexture(newPressB);
+		this.textures.vorticity.setTexture(newVort);
+
+		this.shaderContext.collisions.setBakeTexture(newSdf, newSdfVel);
+
+		// 3. Update grid dimensions in shader context (which updates uniforms)
+		this.shaderContext.updatePhyGrid(newSize);
+
+		// 4. Rebuild the compute passes to match the new dispatch resolutions
+		this.recreateComputeShaders();
 	}
 
 	/**

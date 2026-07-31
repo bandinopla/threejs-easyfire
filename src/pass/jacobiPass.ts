@@ -45,7 +45,14 @@ import { float, If, vec3, vec4 } from "three/tsl";
 
 // 	writeTo.write(coord, vec4(pressure, 0, 0, 0));
 // };
-export const jacobiPass = (context: EasyFireShaderContext, readFrom: DataTexture, writeTo: DataTexture) => () => {
+export const jacobiPass = (
+	context: EasyFireShaderContext,
+	textures: {
+		pressureIn: DataTexture;
+		pressureOut: DataTexture;
+		divergence: DataTexture;
+	}
+) => () => {
 	const coord = context.grid.phy.coord;
 	const uvw = context.grid.phy.uvw;
 	const grid = context.grid.phy;
@@ -57,7 +64,7 @@ export const jacobiPass = (context: EasyFireShaderContext, readFrom: DataTexture
 
 	If(currentDist.lessThanEqual(0.0), () => {
 		// Voxels inside solids have zero pressure
-		writeTo.write(coord, vec4(0.0));
+		textures.pressureOut.write(coord, vec4(0.0));
 	}).Else(() => {
 		const sumPressure = float(0.0).toVar();
 		const fluidCount = float(0.0).toVar();
@@ -78,7 +85,7 @@ export const jacobiPass = (context: EasyFireShaderContext, readFrom: DataTexture
 
 				// MISS (Open fluid): Accumulate pressure & increment fluid neighbor count
 				(otherUvw) => {
-					sumPressure.addAssign(readFrom.sample(otherUvw).x);
+					sumPressure.addAssign(textures.pressureIn.sample(otherUvw).x);
 					fluidCount.addAssign(1.0);
 				},
 			);
@@ -92,7 +99,7 @@ export const jacobiPass = (context: EasyFireShaderContext, readFrom: DataTexture
 		checkNeighbor(0, 0, 1);
 		checkNeighbor(0, 0, -1);
 
-		const divergence = context.texture.divergence.sample(uvw).x;
+		const divergence = textures.divergence.sample(uvw).x;
 
 		const finalPressure = float(0.0).toVar();
 
@@ -101,6 +108,6 @@ export const jacobiPass = (context: EasyFireShaderContext, readFrom: DataTexture
 			finalPressure.assign(sumPressure.sub(divergence).div(fluidCount));
 		});
 
-		writeTo.write(coord, vec4(finalPressure, 0, 0, 0));
+		textures.pressureOut.write(coord, vec4(finalPressure, 0, 0, 0));
 	});
 };

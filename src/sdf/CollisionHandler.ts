@@ -551,7 +551,7 @@ export class CollisionHandler {
 		onHit: (uvw: Node<"vec3">, hitDist: Node<"float">, normal?: Node<"vec3">) => void,
 		onMiss: (uvw: Node<"vec3">) => void,
 	) {
-		const offset = vec3(grid.texel.x, grid.texel.y, grid.texel.z).mul(texelOffset);
+		const offset = grid.texel.mul(texelOffset);
 		const otherUVW = uvw.add(offset);
 
 		// 2. Instantly look up the pre-calculated math!

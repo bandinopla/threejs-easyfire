@@ -2,11 +2,18 @@ import { DataTexture, EasyFireShaderContext } from "src/EasyFireShaderContext";
 import { Fn } from "three/src/nodes/TSL.js";
 import { float, If, vec3, vec4 } from "three/tsl";
 
-export const projectPass = (context: EasyFireShaderContext) => () => {
+export const projectPass = (
+	context: EasyFireShaderContext,
+	textures: {
+		pressure: DataTexture;
+		velocityIn: DataTexture;
+		velocityOut: DataTexture;
+	}
+) => () => {
 	const coord = context.grid.phy.coord;
 	const uvw = context.grid.phy.uvw;
 	const grid = context.grid.phy;
-	const readFrom = context.texture.press.A;
+	const readFrom = textures.pressure;
 	const voxelLocalPos = uvw.sub(0.5).mul(context.uVolumeWorldSize);
 	//const worldPos = context.worldMatrix.mul(vec4(voxelLocalPos, 1.0)).xyz;
 
@@ -15,7 +22,7 @@ export const projectPass = (context: EasyFireShaderContext) => () => {
 
 	If(currentDist.lessThanEqual(0.0), () => {
 		// Voxel is solid: Ensure velocity is absolutely zero inside
-		context.texture.vel.A.write(coord, vec4(0.0));
+		textures.velocityOut.write(coord, vec4(0.0));
 	}).Else(() => {
 		const currentPressure = readFrom.sample(uvw).x;
 
@@ -55,11 +62,11 @@ export const projectPass = (context: EasyFireShaderContext) => () => {
 		const gradient = vec3(pR.sub(pL), pU.sub(pD), pF.sub(pB)).mul(0.5);
 
 		// Subtract gradient from the intermediate velocity field
-		const vel = context.texture.vel.B.sample(uvw).xyz.sub(gradient).toVar();
+		const vel = textures.velocityIn.sample(uvw).xyz.sub(gradient).toVar();
 
 		// Safety catch: redirect any lingering velocity anomalies (slip/ejection)
 		context.collisions.makeVelocityAvoidColliders(vel, uvw);
 
-		context.texture.vel.A.write(coord, vec4(vel, 0));
+		textures.velocityOut.write(coord, vec4(vel, 0));
 	});
 };

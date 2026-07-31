@@ -1,14 +1,20 @@
-import { EasyFireShaderContext } from "../EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext } from "../EasyFireShaderContext";
 import { dot, float, Fn, If, max, min, Return, select, vec3, vec4 } from "three/tsl";
 
 /**
  * @returns
  */
-export const divergencePass = (context: EasyFireShaderContext) => () => {
+export const divergencePass = (
+	context: EasyFireShaderContext,
+	textures: {
+		velocity: DataTexture;
+		divergence: DataTexture;
+	}
+) => () => {
 	const grid = context.grid.phy;
 	const coord = grid.coord;
 	const uvw = grid.uvw;
-	const currVel = context.texture.vel.B.sample(uvw).xyz;
+	const currVel = textures.velocity.sample(uvw).xyz;
 	const voxelLocalPos = uvw.sub(0.5).mul(context.uVolumeWorldSize);
 	const localPos = uvw.sub(0.5).mul(context.uVolumeWorldSize);
 
@@ -30,7 +36,7 @@ export const divergencePass = (context: EasyFireShaderContext) => () => {
 			},
 
 			//miss
-			(otherUvw) => vel.assign(context.texture.vel.B.sample(otherUvw).xyz),
+			(otherUvw) => vel.assign(textures.velocity.sample(otherUvw).xyz),
 		);
 
 		return vel;
@@ -68,5 +74,5 @@ export const divergencePass = (context: EasyFireShaderContext) => () => {
 
 	const divergence = vR.sub(vL).add(vU.sub(vD)).add(vF.sub(vB)).mul(0.5);
 
-	context.texture.divergence.write(coord, vec4(divergence, 0, 0, 0));
+	textures.divergence.write(coord, vec4(divergence, 0, 0, 0));
 };

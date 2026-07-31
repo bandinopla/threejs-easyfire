@@ -68,11 +68,11 @@ export type NoiseTextureConfig = {
 };
 
 export type VoxelGrid = {
-	readonly size: Vector3Like;
+	readonly size: UniformNode<"vec3", Vector3>;
 	readonly coord: Node<"uvec3">;
 	readonly uvw: Node<"vec3">;
-	readonly texel: Vector3Like;
-	readonly count: number;
+	readonly texel: UniformNode<"vec3", Vector3>;
+	readonly count: UniformNode<"uint", number>;
 };
 
 export type DataTexture = {
@@ -104,6 +104,9 @@ function makeDataTexture(
 			return readOnlyNode.value;
 		},
 		setTexture(newTexture: Texture) {
+			if (readOnlyNode.value) {
+				readOnlyNode.value.dispose();
+			}
 			readOnlyNode.value = newTexture;
 			writeOnlyNode.value = newTexture;
 		},
@@ -275,26 +278,18 @@ export class EasyFireShaderContext {
 
 		this.grid = {
 			phy: {
-				size: config.grid.phy,
+				size: uniform(new Vector3().copy(config.grid.phy as Vector3)),
 				coord: phyCoord,
 				uvw: gridCoordToUVW(phyCoord, config.grid.phy),
-				texel: {
-					x: 1 / config.grid.phy.x,
-					y: 1 / config.grid.phy.y,
-					z: 1 / config.grid.phy.z,
-				},
-				count: config.grid.phy.x * config.grid.phy.y * config.grid.phy.z,
+				texel: uniform(new Vector3(1 / config.grid.phy.x, 1 / config.grid.phy.y, 1 / config.grid.phy.z)),
+				count: uniform(config.grid.phy.x * config.grid.phy.y * config.grid.phy.z, "uint"),
 			},
 			dye: {
-				size: config.grid.dye,
+				size: uniform(new Vector3().copy(config.grid.dye as Vector3)),
 				coord: dyeCoord,
 				uvw: gridCoordToUVW(dyeCoord, config.grid.dye),
-				texel: {
-					x: 1 / config.grid.dye.x,
-					y: 1 / config.grid.dye.y,
-					z: 1 / config.grid.dye.z,
-				},
-				count: config.grid.dye.x * config.grid.dye.y * config.grid.dye.z,
+				texel: uniform(new Vector3(1 / config.grid.dye.x, 1 / config.grid.dye.y, 1 / config.grid.dye.z)),
+				count: uniform(config.grid.dye.x * config.grid.dye.y * config.grid.dye.z, "uint"),
 			},
 			world: {
 				size: config.grid.world,
@@ -356,6 +351,19 @@ export class EasyFireShaderContext {
 		);
 	}
 
+	updateDyeGrid(newResolution: Vector3Like) {
+		this.grid.dye.size.value.copy(newResolution as Vector3);
+		this.grid.dye.texel.value.set(1 / newResolution.x, 1 / newResolution.y, 1 / newResolution.z);
+		this.grid.dye.count.value = newResolution.x * newResolution.y * newResolution.z;
+		this.dyeVoxelSizeWorld.copy(this.grid.world.size).divide(newResolution as Vector3);
+	}
+
+	updatePhyGrid(newResolution: Vector3Like) {
+		this.grid.phy.size.value.copy(newResolution as Vector3);
+		this.grid.phy.texel.value.set(1 / newResolution.x, 1 / newResolution.y, 1 / newResolution.z);
+		this.grid.phy.count.value = newResolution.x * newResolution.y * newResolution.z;
+	}
+
 	insideBoundingVolume(worldPos: Node<"vec3">, callMe: (uvw: Node<"vec3">) => void) {
 		const bboxPosition = this.invWorldMatrix.mul(worldPos).xyz;
 		const uvw = bboxPosition
@@ -377,7 +385,7 @@ export class EasyFireShaderContext {
 		);
 	}
 
-	sampleVolumeAt(worldPos: Node<"vec3">) {
+	sampleVolumeAt(worldPos: Node<"vec3">, textures: { velocity: DataTexture; dye: DataTexture }) {
 		//const bboxPosition = modelWorldMatrixInverse.mul(worldPos);
 
 		const bboxPosition = this.invWorldMatrix.mul(worldPos).xyz;
@@ -389,13 +397,13 @@ export class EasyFireShaderContext {
 			.toVar();
 
 		// 1) Domain Warping
-		const noiseDistortion = this.texture.vel.A.sample(uvw)
+		const noiseDistortion = textures.velocity.sample(uvw)
 			.xyz.div(this.uVolumeWorldSize)
 			.mul(0.35)
 			.mul(this.uTurbulence);
 		const distortedUVW = uvw.add(noiseDistortion).clamp(0.0, 1.0).toVar();
 
-		const sample = this.texture.dye.A.sample(uvw);
+		const sample = textures.dye.sample(uvw);
 
 		const density = sample.r.toVar(); //Declare as Var so we can mutate
 		const age = sample.b;

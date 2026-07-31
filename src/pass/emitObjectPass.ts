@@ -1,4 +1,4 @@
-import { EasyFireShaderContext } from "src/EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext } from "src/EasyFireShaderContext";
 import { ComputeNodeHook } from "src/EmitterManager";
 import {
 	ceil,
@@ -21,12 +21,18 @@ import {
 	vec4,
 } from "three/tsl";
 
-export const emitObjectPassFragment: (context: EasyFireShaderContext) => ComputeNodeHook =
-	(context) => (vertexPos, worldPos, emitMultiplier, worldMatrix, objVelData, tintFactor) => {
+export const emitObjectPassFragment = (
+	context: EasyFireShaderContext,
+	textures: {
+		dyeIn: DataTexture;
+		dyeOut: DataTexture;
+	}
+): ComputeNodeHook =>
+	(vertexPos, worldPos, emitMultiplier, worldMatrix, objVelData, tintFactor) => {
 		context.insideBoundingVolume(worldPos, (uvw) => {
 			const grid = context.grid.dye;
-			const gridDims = uvec3(grid.size.x, grid.size.y, grid.size.z);
-			const centerCoord = uvec3(uvw.mul(gridDims));
+			const gridDims = uvec3(grid.size);
+			const centerCoord = uvec3(uvw.mul(grid.size));
 			const voxelSizeWorld = context.uVolumeWorldSize.div(gridDims);
 			const invGridDims = vec3(1.0).div(gridDims);
 
@@ -42,7 +48,7 @@ export const emitObjectPassFragment: (context: EasyFireShaderContext) => Compute
 			const tempBaseVal = context.uEmitTemperature.mul(0.05);
 
 			If(densityBaseVal.greaterThan(0.0), () => {
-				const currentDye = context.texture.dye.A.sample(uvw);
+				const currentDye = textures.dyeIn.sample(uvw);
 
 				const addedDensity = densityBaseVal.mul(1);
 				const addedTemp = tempBaseVal.mul(1);
@@ -60,31 +66,36 @@ export const emitObjectPassFragment: (context: EasyFireShaderContext) => Compute
 				const newAge = mix(currentDye.b, float(0.0), ageMixWeight); // 3. Reset age proportionally based on how much fresh fire was injected
 
 				// 4. Safely write back to the correct offset coordinate
-				context.texture.dye.B.write(centerCoord, vec4(newDensity, newTemp, newAge, newColorMass));
+				textures.dyeOut.write(centerCoord, vec4(newDensity, newTemp, newAge, newColorMass));
 
 				//});
 			});
 		});
 	};
 
-export const emitObjectsVelocityAndDyePassFragment: (context: EasyFireShaderContext) => ComputeNodeHook =
-	(context) => (vertexPos, worldPos, emitMultiplier, worldMatrix, objVelData) => {
+export const emitObjectsVelocityAndDyePassFragment = (
+	context: EasyFireShaderContext,
+	textures: {
+		velocity: DataTexture;
+	}
+): ComputeNodeHook =>
+	(vertexPos, worldPos, emitMultiplier, worldMatrix, objVelData) => {
 		//
 		context.insideBoundingVolume(worldPos, (uvw) => {
 			const grid = context.grid.phy;
-			const coord = uvec3(uvw.mul(vec3(grid.size.x, grid.size.y, grid.size.z)));
+			const coord = uvec3(uvw.mul(grid.size));
 
 			const objVelocity = objVelData.xyz;
 			const objSpeed = objVelData.w;
 
 			If(objSpeed.greaterThan(0.001), () => {
 				// Read directly from velTexA
-				const currentVel = context.texture.vel.B.sample(uvw).xyz;
+				const currentVel = textures.velocity.sample(uvw).xyz;
 
 				const velocityImpulse = objVelocity.mul(-0.1).mul(objSpeed); //
 				const newVel = currentVel.add(velocityImpulse);
 
-				//context.texture.vel.A.write(coord, vec4(newVel, 1.0));
+				//textures.velocity.write(coord, vec4(newVel, 1.0));
 			});
 		});
 	};

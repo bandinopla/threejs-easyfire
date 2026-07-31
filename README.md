@@ -85,6 +85,40 @@ scene.add(box);
 // flag it as a collider...
 myFire.makeObjectCollidable(box, "ellipsoid");
 ```
+#### Define a custom collider
+Optionally you can create your own colliders using Signed Distance fields, just:
+
+1. Create a class that extends `SDFShape`
+
+```js
+import { SDFShape } from "threejs-easyfire";
+import { Node } from "three/webgpu"; 
+import { abs, length, max, min } from "three/tsl";
+
+export class MyCustomSDFBox extends SDFShape {
+	override sdf(localPos: Node<"vec3">, halfExtents: Node<"vec3">): Node<"float"> {
+		const q = abs(localPos).sub(halfExtents);
+		return length(max(q, 0.0)).add(min(max(q.x, max(q.y, q.z)), 0.0));
+	}
+}
+
+```
+2. And add it to the EasyFire config:
+```js
+const myFire = new EasyFire(renderer, {
+	//...
+	collisions: {
+		sdfShapes: [
+			new MyCustomSDFBox(10,"myCustomBox") // says MAX count of this type will be 10
+		]
+	}
+});
+```
+3. Use it...
+```js
+myFire.makeObjectCollidable(box, "myCustomBox");
+```
+To play with SDF Shapes and test things out if you are not familiar with sdf check out this all: ***[threejs-sdf-shapes playground](https://threejs-sdf-shapes.ai.studio/)***
 
 ## Initialize
 Must call this before the scene renders, this will create 

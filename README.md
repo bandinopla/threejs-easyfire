@@ -5,6 +5,8 @@
 
 My motivation to make this module is to make adding fire something a bit easyer so the basics are somewhat covered and you can focus on the layers on top adding your artistic imprint. This fire class offers ways to edit the fire and extend it, so it serves as a very nice base to build on top of.
 
+#### > Talk with the docs (+audio): [Gemini Notebook](https://notebook.google.com/notebook/2cc20d63-0ac7-4e18-880c-ce4545f1c2d7)
+
 ## Features
 - Highly configurable + Automatic Inspector panel per instance.
 - Collision detection: The fire interacts with dynamic colliders vía [Signed distance fields](https://en.wikipedia.org/wiki/Signed_distance_function)
@@ -13,7 +15,10 @@ My motivation to make this module is to make adding fire something a bit easyer 
 - Proxy system: When the fire is applied, you are offered a proxy object that you can control and the class will automatically keep everything in sync.
 - Debug flags to visually see the colliders, bounding box of the simulation ( useful when things are not appearing where they should and you don't know why )
 
-To see implementation code check [the demo source](demo/demo.ts)
+To see implementation code check **[the demo source](demo/demo.ts)**
+Feed the llms.txt to your favourite assistant to know more.
+
+> **The more you know:** this will create a total of 11 textures so be mindful of the resolution you chose (mayority will use the physics grid resolution). If you know how to optimize this, do a PR.
 
 ## Install
 

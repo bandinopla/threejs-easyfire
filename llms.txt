@@ -72,3 +72,31 @@ The source code is located in the `src` directory and is structured as follows:
 
 - **`util/` Directory:**
   Utility functions, such as `createStorage3D.ts` for creating 3D textures.
+
+## 3D Textures
+the textures used are created in the [EasyFireShaderContext.ts](src/EasyFireShaderContext.ts) constructor, placed in it's .texture property. It creates a total of 11 textures. 
+Their resolution is defined by the grid size. Some use the dye resolution some use the physics resolution. 
+The created textures are:
+
+1. curlNoise (phy res)
+2. vel.A (phy res)
+3. vel.B (phy res)
+4. dye.A (dye res)
+5. dye.B (dye res)
+6. divergence (dye res)
+7. press.A (phy res)
+8. press.B (phy res)
+9. vorticity (phy res)
+10. sdf ( collider's volume, phy res)
+11. sdf velocity ( collider's velocities, phy res)
+
+## Collision detection
+this happens in the `projectPass.ts` at the bottom it will call `makeVelocityAvoidColliders` to correct the velocity to avoid obstacles. That function is imported from `src/sdf/CollisionHandler.ts`
+Internally it will use the pre-baked volumetric 3D texture that contains all the colliders SDF Shapes. This bake happened at the start of the frame on `src/EasyFire.ts`int he update loop with a call to the compute shader `bakeColliders` that is defined in `src/sdf/CollisionHandler.ts` in the `bakeCollidersPass` function where the sdf check per voxel is executed and the info is stored/baked on the sdf and sdfVelocities textures.
+More details in `src/sdf/readme-sdf.txt`.
+
+## Compute shaders & passes
+The sequence of shader compute passes is defined in the `update` function in `src/EasyFire`
+
+## Shader passes details
+you can read more details on what the shader passes do in `src/pass/readme-passes.txt`

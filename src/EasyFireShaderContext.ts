@@ -57,10 +57,12 @@ const getVoxelCoord = (id: IndexNode, size: Vector3Like) => {
 	return uvec3(x, y, z);
 };
 
-const gridCoordToUVW = (coord: Node<"uvec3">, grid: Vector3Like) =>
-	vec3(coord)
+const gridCoordToUVW = (coord: Node<"uvec3">, grid: Node<"vec3"> | Vector3Like) => {
+	const gridNode = (grid as any).isNode ? (grid as Node<"vec3">) : vec3((grid as Vector3Like).x, (grid as Vector3Like).y, (grid as Vector3Like).z);
+	return vec3(coord)
 		.add(0.5)
-		.div(vec3(grid.x, grid.y, grid.z));
+		.div(gridNode);
+};
 
 export type NoiseTextureConfig = {
 	size: number;
@@ -104,9 +106,6 @@ function makeDataTexture(
 			return readOnlyNode.value;
 		},
 		setTexture(newTexture: Texture) {
-			if (readOnlyNode.value) {
-				readOnlyNode.value.dispose();
-			}
 			readOnlyNode.value = newTexture;
 			writeOnlyNode.value = newTexture;
 		},
@@ -276,18 +275,21 @@ export class EasyFireShaderContext {
 		this.uVertexSplatBrushOffsetsCount = uniform(0, "uint");
 		this.uEmitRadiusWorld = uniform(0, "float");
 
+		const phySizeUniform = uniform(new Vector3().copy(config.grid.phy as Vector3));
+		const dyeSizeUniform = uniform(new Vector3().copy(config.grid.dye as Vector3));
+
 		this.grid = {
 			phy: {
-				size: uniform(new Vector3().copy(config.grid.phy as Vector3)),
+				size: phySizeUniform,
 				coord: phyCoord,
-				uvw: gridCoordToUVW(phyCoord, config.grid.phy),
+				uvw: gridCoordToUVW(phyCoord, phySizeUniform),
 				texel: uniform(new Vector3(1 / config.grid.phy.x, 1 / config.grid.phy.y, 1 / config.grid.phy.z)),
 				count: uniform(config.grid.phy.x * config.grid.phy.y * config.grid.phy.z, "uint"),
 			},
 			dye: {
-				size: uniform(new Vector3().copy(config.grid.dye as Vector3)),
+				size: dyeSizeUniform,
 				coord: dyeCoord,
-				uvw: gridCoordToUVW(dyeCoord, config.grid.dye),
+				uvw: gridCoordToUVW(dyeCoord, dyeSizeUniform),
 				texel: uniform(new Vector3(1 / config.grid.dye.x, 1 / config.grid.dye.y, 1 / config.grid.dye.z)),
 				count: uniform(config.grid.dye.x * config.grid.dye.y * config.grid.dye.z, "uint"),
 			},

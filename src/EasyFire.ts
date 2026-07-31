@@ -1401,14 +1401,18 @@ export class EasyFire extends Object3D {
 		const newDyeA = createStorage3D("dyeA", width, height, depth);
 		const newDyeB = createStorage3D("dyeB", width, height, depth);
 
-		// 2. Assign and dispose the old textures
+		// 2. Dispose the old textures
+		this.textures.dyeA.getTexture()?.dispose();
+		this.textures.dyeB.getTexture()?.dispose();
+
+		// 3. Assign the new textures
 		this.textures.dyeA.setTexture(newDyeA);
 		this.textures.dyeB.setTexture(newDyeB);
 
-		// 3. Update grid dimensions in shader context (which updates uniforms)
+		// 4. Update grid dimensions in shader context (which updates uniforms)
 		this.shaderContext.updateDyeGrid(newSize);
 
-		// 4. Rebuild the compute passes to match the new dispatch resolutions
+		// 5. Rebuild the compute passes to match the new dispatch resolutions
 		this.recreateComputeShaders();
 	}
 
@@ -1427,7 +1431,21 @@ export class EasyFire extends Object3D {
 		const newSdf = createStorage3D("sdf", width, height, depth);
 		const newSdfVel = createStorage3D("sdfVelocity", width, height, depth);
 
-		// 2. Assign and dispose the old textures
+		// 2. Dispose the old textures
+		this.textures.velA.getTexture()?.dispose();
+		this.textures.velB.getTexture()?.dispose();
+		this.textures.divergence.getTexture()?.dispose();
+		this.textures.pressA.getTexture()?.dispose();
+		this.textures.pressB.getTexture()?.dispose();
+		this.textures.vorticity.getTexture()?.dispose();
+
+		// Dispose of collision textures inside collisions
+		this.textures.vorticity.getTexture()?.dispose(); // wait, we already disposed vorticity.
+		// Collisions SDF textures:
+		(this.shaderContext.collisions as any).bakeTexture?.getTexture()?.dispose();
+		(this.shaderContext.collisions as any).bakeVelocityTexture?.getTexture()?.dispose();
+
+		// 3. Assign the new textures
 		this.textures.velA.setTexture(newVelA);
 		this.textures.velB.setTexture(newVelB);
 		this.textures.divergence.setTexture(newDiv);
@@ -1437,10 +1455,10 @@ export class EasyFire extends Object3D {
 
 		this.shaderContext.collisions.setBakeTexture(newSdf, newSdfVel);
 
-		// 3. Update grid dimensions in shader context (which updates uniforms)
+		// 4. Update grid dimensions in shader context (which updates uniforms)
 		this.shaderContext.updatePhyGrid(newSize);
 
-		// 4. Rebuild the compute passes to match the new dispatch resolutions
+		// 5. Rebuild the compute passes to match the new dispatch resolutions
 		this.recreateComputeShaders();
 	}
 

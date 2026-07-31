@@ -377,7 +377,7 @@ export class EasyFireShaderContext {
 		);
 	}
 
-	sampleVolumeAt(worldPos: Node<"vec3">) {
+	sampleVolumeAt(worldPos: Node<"vec3">, textures: { velocity: DataTexture; dye: DataTexture }) {
 		//const bboxPosition = modelWorldMatrixInverse.mul(worldPos);
 
 		const bboxPosition = this.invWorldMatrix.mul(worldPos).xyz;
@@ -389,13 +389,13 @@ export class EasyFireShaderContext {
 			.toVar();
 
 		// 1) Domain Warping
-		const noiseDistortion = this.texture.vel.A.sample(uvw)
+		const noiseDistortion = textures.velocity.sample(uvw)
 			.xyz.div(this.uVolumeWorldSize)
 			.mul(0.35)
 			.mul(this.uTurbulence);
 		const distortedUVW = uvw.add(noiseDistortion).clamp(0.0, 1.0).toVar();
 
-		const sample = this.texture.dye.A.sample(uvw);
+		const sample = textures.dye.sample(uvw);
 
 		const density = sample.r.toVar(); //Declare as Var so we can mutate
 		const age = sample.b;

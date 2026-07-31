@@ -75,7 +75,7 @@ import {
 import { EmitterManager, EmitterObjectDef, EmitterOptions } from "./EmitterManager";
 import { createStorage3D } from "./util/createStorage3D";
 import { bayer16 } from "three/examples/jsm/tsl/math/Bayer.js";
-import { EasyFireShaderContext, NoiseTextureConfig } from "./EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext, NoiseTextureConfig } from "./EasyFireShaderContext";
 import { curlNoisePass } from "./pass/curlNoisePass";
 import { advectVelocityPass } from "./pass/advectVelocityPass";
 import { divergencePass } from "./pass/divergencePass";
@@ -193,6 +193,21 @@ export class EasyFire extends Object3D {
 	 * Data relevant to the compute shaders so they can do their thing...
 	 */
 	readonly shaderContext: EasyFireShaderContext;
+
+	/**
+	 * Textures slot mapping used in the simulation
+	 */
+	readonly textures: {
+		curlNoise: DataTexture;
+		velA: DataTexture;
+		velB: DataTexture;
+		dyeA: DataTexture;
+		dyeB: DataTexture;
+		divergence: DataTexture;
+		pressA: DataTexture;
+		pressB: DataTexture;
+		vorticity: DataTexture;
+	};
 
 	public simulate: boolean = true;
 	public simulationSpeed = 2;
@@ -358,6 +373,18 @@ export class EasyFire extends Object3D {
 			collisions: this.collisions,
 		});
 
+		this.textures = {
+			curlNoise: this.shaderContext.texture.curlNoise,
+			velA: this.shaderContext.texture.vel.A,
+			velB: this.shaderContext.texture.vel.B,
+			dyeA: this.shaderContext.texture.dye.A,
+			dyeB: this.shaderContext.texture.dye.B,
+			divergence: this.shaderContext.texture.divergence,
+			pressA: this.shaderContext.texture.press.A,
+			pressB: this.shaderContext.texture.press.B,
+			vorticity: this.shaderContext.texture.vorticity,
+		};
+
 		this.vertexEmissionRadius = cfg.vertexEmissionWorldRadius;
 
 		// 1. Workgroup size per 3D block (4x4x4 = 64 threads)
@@ -406,10 +433,11 @@ export class EasyFire extends Object3D {
 				.setName(name);
 		};
 
-		const pressTexture = this.shaderContext.texture.press;
-
 		const computeShaders = {
-			vorticityPass: inBoundsRun("Vorticity", phyGridRes, PHYS_DISPATCH, vorticityPass(this.shaderContext)),
+			vorticityPass: inBoundsRun("Vorticity", phyGridRes, PHYS_DISPATCH, vorticityPass(this.shaderContext, {
+				velocity: this.textures.velA,
+				vorticity: this.textures.vorticity,
+			})),
 
 			bakeColliders: inBoundsRun(
 				"Bake Colliders",
@@ -422,42 +450,74 @@ export class EasyFire extends Object3D {
 				"Curl Noise",
 				{ x: cfg.noise.size, y: cfg.noise.size, z: cfg.noise.size },
 				NOISE_DISPATCH,
-				curlNoisePass(this.shaderContext),
+				curlNoisePass(this.shaderContext, {
+					curlNoise: this.textures.curlNoise,
+				}),
 			),
 
 			advectPassCompute: inBoundsRun(
 				"Advect Velocity",
 				phyGridRes,
 				PHYS_DISPATCH,
-				advectVelocityPass(this.shaderContext),
+				advectVelocityPass(this.shaderContext, {
+					velocity: this.textures.velA,
+					dye: this.textures.dyeA,
+					curlNoise: this.textures.curlNoise,
+					vorticity: this.textures.vorticity,
+					velocityOut: this.textures.velB,
+				}),
 			),
 
-			divPassCompute: inBoundsRun("Divergence", phyGridRes, PHYS_DISPATCH, divergencePass(this.shaderContext)),
+			divPassCompute: inBoundsRun("Divergence", phyGridRes, PHYS_DISPATCH, divergencePass(this.shaderContext, {
+				velocity: this.textures.velB,
+				divergence: this.textures.divergence,
+			})),
 
 			jacobiPassABCompute: inBoundsRun(
 				"jacobiABCompute",
 				phyGridRes,
 				PHYS_DISPATCH,
-				jacobiPass(this.shaderContext, pressTexture.A, pressTexture.B),
+				jacobiPass(this.shaderContext, {
+					pressureIn: this.textures.pressA,
+					pressureOut: this.textures.pressB,
+					divergence: this.textures.divergence,
+				}),
 			),
 
 			jacobiPassBACompute: inBoundsRun(
 				"jacobiBACompute",
 				phyGridRes,
 				PHYS_DISPATCH,
-				jacobiPass(this.shaderContext, pressTexture.B, pressTexture.A),
+				jacobiPass(this.shaderContext, {
+					pressureIn: this.textures.pressB,
+					pressureOut: this.textures.pressA,
+					divergence: this.textures.divergence,
+				}),
 			),
 
-			projectCompute: inBoundsRun("Project", phyGridRes, PHYS_DISPATCH, projectPass(this.shaderContext)),
+			projectCompute: inBoundsRun("Project", phyGridRes, PHYS_DISPATCH, projectPass(this.shaderContext, {
+				pressure: this.textures.pressA,
+				velocityIn: this.textures.velB,
+				velocityOut: this.textures.velA,
+			})),
 
-			advectDyeCompute: inBoundsRun("Advect Dye", dyeGridRes, DYE_DISPATCH, advectDyePass(this.shaderContext)),
+			advectDyeCompute: inBoundsRun("Advect Dye", dyeGridRes, DYE_DISPATCH, advectDyePass(this.shaderContext, {
+				velocity: this.textures.velA,
+				dyeIn: this.textures.dyeA,
+				dyeOut: this.textures.dyeB,
+			})),
 
 			objectsPassCompute: this.objectsManager
-				.computeNodePerVertex(emitObjectPassFragment(this.shaderContext))
+				.computeNodePerVertex(emitObjectPassFragment(this.shaderContext, {
+					dyeIn: this.textures.dyeA,
+					dyeOut: this.textures.dyeB,
+				}))
 				.setName("emit Ojects"),
 
 			emitObjectsVelocityAndDyePass: this.objectsManager
-				.computeNodePerVertex(emitObjectsVelocityAndDyePassFragment(this.shaderContext))
+				.computeNodePerVertex(emitObjectsVelocityAndDyePassFragment(this.shaderContext, {
+					velocity: this.textures.velB,
+				}))
 				.setName("emitVelocityAndDye"),
 		};
 		//--------------------------------------------------------------------------------------------------------------------------
@@ -465,7 +525,10 @@ export class EasyFire extends Object3D {
 		// 2. Define the TSL function to take the ray position as an argument
 		// In TSL, fn() arguments are passed as an array to the callback
 		const calculateScattering = Fn(([posRay]: [Node<"vec3">]) => {
-			const { density, temperature, colorMass, bboxPosition, uvw } = this.shaderContext.sampleVolumeAt(posRay);
+			const { density, temperature, colorMass, bboxPosition, uvw } = this.shaderContext.sampleVolumeAt(posRay, {
+				velocity: this.textures.velA,
+				dye: this.textures.dyeA,
+			});
 
 			//const crispDensity = smoothstep(0.05, 0.35, density);
 			const crispDensity = pow(density, float(1.5));
@@ -536,7 +599,7 @@ export class EasyFire extends Object3D {
 				.add(0.5)
 				.toVar();
 
-			return this.shaderContext.texture.curlNoise.sample(uvw);
+			return this.textures.curlNoise.sample(uvw);
 		});
 
 		//// interesting pattern...

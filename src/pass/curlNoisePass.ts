@@ -1,8 +1,13 @@
 import { float, Fn, globalId, If, ivec3, Return, vec3, vec4 } from "three/tsl";
-import { EasyFireShaderContext } from "../EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext } from "../EasyFireShaderContext";
 import { snoiseVec3 } from "three/examples/jsm/tsl/math/curlNoise.js";
 
-export const curlNoisePass = (context: EasyFireShaderContext) => () => {
+export const curlNoisePass = (
+	context: EasyFireShaderContext,
+	textures: {
+		curlNoise: DataTexture;
+	}
+) => () => {
 	const coord = globalId;
 	const noiseSize = context.noiseTextureConfig.size;
 	const gridRes = ivec3(noiseSize, noiseSize, noiseSize);
@@ -49,5 +54,5 @@ export const curlNoisePass = (context: EasyFireShaderContext) => () => {
 
 	const noiseVal = vec3(x, y, z).mul(context.uCurlNoiseMultiplier);
 
-	context.texture.curlNoise.write(coord, vec4(noiseVal, 0.0)); //
+	textures.curlNoise.write(coord, vec4(noiseVal, 0.0)); //
 };

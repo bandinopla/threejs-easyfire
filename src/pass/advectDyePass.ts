@@ -1,12 +1,19 @@
-import { EasyFireShaderContext } from "src/EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext } from "src/EasyFireShaderContext";
 import { float, floor, Fn, If, max, vec3, vec4 } from "three/tsl";
 
-export const advectDyePass = (context: EasyFireShaderContext) => () => {
+export const advectDyePass = (
+	context: EasyFireShaderContext,
+	textures: {
+		velocity: DataTexture;
+		dyeIn: DataTexture;
+		dyeOut: DataTexture;
+	}
+) => () => {
 	const coord = context.grid.dye.coord;
 	const uvw = context.grid.dye.uvw;
 	const grid = context.grid.dye;
 
-	const vel = context.texture.vel.A.sample(uvw).xyz;
+	const vel = textures.velocity.sample(uvw).xyz;
 	const velUVW = vel.div(context.uVolumeWorldSize);
 	const prevPos = uvw.sub(velUVW.mul(context.uDt)).toVar();
 
@@ -30,7 +37,7 @@ export const advectDyePass = (context: EasyFireShaderContext) => () => {
 	});
 	//------------------------
 
-	const dye = context.texture.dye.A.sample(prevPos);
+	const dye = textures.dyeIn.sample(prevPos);
 	const dissipationFactor = max(float(1).sub(context.uDissipation.mul(context.uDt)), 0);
 
 	const density = dye.r.mul(dissipationFactor).toVar();
@@ -42,7 +49,7 @@ export const advectDyePass = (context: EasyFireShaderContext) => () => {
 	// Nearest neighbor lookup for age to prevent numerical diffusion
 	const gridDims = vec3(grid.size.x, grid.size.y, grid.size.z);
 	const nearestUVW = floor(prevPos.mul(gridDims)).add(0.5).div(gridDims);
-	const age = context.texture.dye.A.sample(nearestUVW).b.add(context.uDt).toVar();
+	const age = textures.dyeIn.sample(nearestUVW).b.add(context.uDt).toVar();
 
 	//temperature.assign(temperature.clamp(0, 3));
 
@@ -50,7 +57,7 @@ export const advectDyePass = (context: EasyFireShaderContext) => () => {
 		age.assign(0.0);
 	});
 
-	context.texture.dye.B.write(coord, vec4(density, temperature, age, colorMass));
+	textures.dyeOut.write(coord, vec4(density, temperature, age, colorMass));
 
 	// const localPos = uvw.sub(0.5).mul(context.uVolumeWorldSize);
 	// const foo = vec3(0, 0, 0).toVar();

@@ -1,20 +1,29 @@
-import { EasyFireShaderContext } from "../EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext } from "../EasyFireShaderContext";
 import { float, Fn, If, max, min, Return, smoothstep, vec3, vec4 } from "three/tsl";
 import { applyVorticity } from "./vorticityPass";
 
-export const advectVelocityPass = (context: EasyFireShaderContext) => () => {
+export const advectVelocityPass = (
+	context: EasyFireShaderContext,
+	textures: {
+		velocity: DataTexture;
+		dye: DataTexture;
+		curlNoise: DataTexture;
+		vorticity: DataTexture;
+		velocityOut: DataTexture;
+	}
+) => () => {
 	const coord = context.grid.phy.coord;
 	const uvw = context.grid.phy.uvw;
 
-	const vel = context.texture.vel.A.sample(uvw).xyz; //texture3D(velTexA, uvw, 0).xyz;
-	/////const dye = context.texture.dye.A.sample(uvw); //
+	const vel = textures.velocity.sample(uvw).xyz; //texture3D(velTexA, uvw, 0).xyz;
+	/////const dye = textures.dye.sample(uvw); //
 
 	// semi-Lagrangian advection: look back along the velocity
 	const velUVW = vel.div(context.uVolumeWorldSize);
 	const prevPos = uvw.sub(velUVW.mul(context.uDt));
 
-	const newVel = context.texture.vel.A.sample(prevPos).xyz.toVar();
-	const dye = context.texture.dye.A.sample(prevPos).toVar();
+	const newVel = textures.velocity.sample(prevPos).xyz.toVar();
+	const dye = textures.dye.sample(prevPos).toVar();
 
 	const density = dye.r;
 	const temperature = dye.g;
@@ -31,7 +40,7 @@ export const advectVelocityPass = (context: EasyFireShaderContext) => () => {
 	const thermalNoisePos = uvw.add(vec3(0, age.negate().mul(0.6), age.mul(0.13)).div(context.uTurbFrequency));
 
 	const decay = age.mul(context.uTurbulenceDecay.negate()).exp();
-	const thermalTurbulence = context.texture.curlNoise
+	const thermalTurbulence = textures.curlNoise
 		.sample(thermalNoisePos)
 		.xyz.mul(context.uTurbulence)
 		.mul(temperature)
@@ -41,7 +50,7 @@ export const advectVelocityPass = (context: EasyFireShaderContext) => () => {
 	const ambientNoisePos = uvw.add(
 		vec3(0, context.uTime.mul(0.15), context.uTime.mul(0.01)).div(context.uTurbFrequency),
 	);
-	const ambientTurbulence = context.texture.curlNoise
+	const ambientTurbulence = textures.curlNoise
 		.sample(ambientNoisePos)
 		.xyz.mul(context.uTurbulence)
 		.mul(density);
@@ -59,7 +68,7 @@ export const advectVelocityPass = (context: EasyFireShaderContext) => () => {
 	// const localPos = uvw.sub(0.5).mul(context.uVolumeWorldSize);
 	// context.collisions.makeVelocityAvoidColliders(newVel, context.worldMatrix.mul(localPos).xyz);
 
-	applyVorticity(context, uvw, context.grid.phy.texel, newVel);
+	applyVorticity(context, uvw, context.grid.phy.texel, newVel, textures.vorticity);
 
-	context.texture.vel.B.write(coord, vec4(newVel, 0));
+	textures.velocityOut.write(coord, vec4(newVel, 0));
 };

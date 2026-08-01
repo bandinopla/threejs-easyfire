@@ -34,6 +34,9 @@ The library simulates fire/smoke on a 3D voxel grid. Emitters add "dye" and temp
 ## Resolution
 The system uses 3 grids... one is the size of the bounding box in your 3d scene, in world units, where the simulation will take place. The other is the size of the render grid, in 3d voxels size, think of it like a Minecraft cube... and the physics is also a 3d texture. They are separated because visually, you can have a small physics voxel grid and it will save processing time and most likely it wont be that noticeable. They are separated so you can test what setup works best. 
 
+## Textures used
+Read `shader_textures_usage.md` to see what textures are used and how.
+
 ## Proxy objects
 the library interfaces with you via proxy objects. These are simple Object3D that you can move and animate. Once thing to have in mind, the system uses it's matrixWorld to calculate the position relative to the simulation local space and the colliders that use them to render theyr SDF shapes always assume they are a non-uniformally scaled 1:1:1 box. So the scale of the collider's proxy object is what is used to calculate the AABB of the SDF shape.
 

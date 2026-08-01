@@ -57,10 +57,7 @@ const getVoxelCoord = (id: IndexNode, size: Vector3Like) => {
 	return uvec3(x, y, z);
 };
 
-const gridCoordToUVW = (coord: Node<"uvec3">, grid: Vector3Like) =>
-	vec3(coord)
-		.add(0.5)
-		.div(vec3(grid.x, grid.y, grid.z));
+const gridCoordToUVW = (coord: Node<"uvec3">, grid: Node<"uvec3">) => vec3(coord).add(0.5).div(grid.toVec3());
 
 export type NoiseTextureConfig = {
 	size: number;
@@ -68,11 +65,11 @@ export type NoiseTextureConfig = {
 };
 
 export type VoxelGrid = {
-	readonly size: Vector3Like;
+	readonly size: Node<"uvec3">;
 	readonly coord: Node<"uvec3">;
 	readonly uvw: Node<"vec3">;
-	readonly texel: Vector3Like;
-	readonly count: number;
+	readonly texel: UniformNode<"vec3", Vector3>;
+	//readonly count: number;
 };
 
 export type DataTexture = {
@@ -81,6 +78,9 @@ export type DataTexture = {
 	loadPixel: (iuvw: Node<"ivec3">) => Texture3DNode;
 	getTexture(): Texture;
 	setTexture(newTexture: Texture): void;
+
+	resize(size: Vector3Like): void;
+	resize(size: number): void;
 };
 
 function makeDataTexture(
@@ -88,7 +88,7 @@ function makeDataTexture(
 	size: Vector3Like,
 	config?: { wrap?: Wrapping; format?: AnyPixelFormat; writeOnly?: boolean; dataType?: TextureDataType },
 ): DataTexture {
-	const texture = createStorage3D(name, size.x, size.y, size.z, config?.format, config?.dataType);
+	let texture = createStorage3D(name, size.x, size.y, size.z, config?.format, config?.dataType);
 
 	const readOnlyNode = texture3D(texture);
 	const writeOnlyNode = storageTexture(texture).toWriteOnly();
@@ -116,15 +116,35 @@ function makeDataTexture(
 		loadPixel(iuvw) {
 			return readOnlyNode.load(iuvw);
 		},
+		resize(size: Vector3Like | number) {
+			this.getTexture().dispose();
+
+			let x = 0,
+				y = 0,
+				z = 0;
+
+			if (typeof size == "number") {
+				x = y = z = size;
+			} else {
+				x = size.x;
+				y = size.y;
+				z = size.z;
+			}
+
+			texture = createStorage3D(name, x, y, z, config?.format, config?.dataType);
+
+			if (config?.wrap) {
+				texture.wrapR = config.wrap;
+				texture.wrapS = config.wrap;
+				texture.wrapT = config.wrap;
+			}
+
+			this.setTexture(texture);
+		},
 	};
 }
 
 export class EasyFireShaderContext {
-	/**
-	 * Size of 1 voxel in physical meters
-	 */
-	readonly dyeVoxelSizeWorld: Vector3;
-
 	// /**
 	//  *  Radius in integer voxel count (CPU calculation)
 	//  */
@@ -189,16 +209,6 @@ export class EasyFireShaderContext {
 	readonly noiseTextureConfig: NoiseTextureConfig;
 
 	/**
-	 * offsets in dye grid units for when a vertex will splat data on dye grid
-	 * This is calculated once on CPU before calling the emitObjectsPass to speed up the process
-	 *
-	 * xyz offset + w fallof factor
-	 */
-	readonly uVertexSplatBrushOffsets: UniformArrayNode<"ivec4">;
-	readonly uVertexSplatBrushOffsetsCount: UniformNode<"uint", number>;
-	readonly uEmitRadiusWorld: UniformNode<"float", number>;
-
-	/**
 	 * to turn world space coord to local space of our bounding box
 	 */
 	readonly invWorldMatrix: UniformNode<"mat4", Matrix4>;
@@ -208,7 +218,7 @@ export class EasyFireShaderContext {
 		phy: VoxelGrid;
 		dye: VoxelGrid;
 		world: Readonly<{
-			size: Readonly<Vector3Like>;
+			size: UniformNode<"vec3", Vector3>;
 		}>;
 	}>;
 
@@ -241,9 +251,15 @@ export class EasyFireShaderContext {
 		};
 		//detailNoise: DataTexture;
 		vorticity: DataTexture;
+		sdf: DataTexture;
+		sdfVelocities: DataTexture;
 	};
 
 	readonly collisions: CollisionHandler;
+
+	readonly uGridPhySize: UniformNode<"uvec3", Vector3>;
+	readonly uGridDyeSize: UniformNode<"uvec3", Vector3>;
+	readonly uGridNoiseSize: UniformNode<"uint", number>;
 
 	constructor(config: {
 		world: Object3D;
@@ -258,50 +274,33 @@ export class EasyFireShaderContext {
 		this.noiseTextureConfig = config.noiseTextureConfig;
 		this.collisions = config.collisions;
 
+		this.uGridPhySize = uniform(new Vector3(config.grid.phy.x, config.grid.phy.y, config.grid.phy.z), "uvec3");
+		this.uGridDyeSize = uniform(new Vector3(config.grid.dye.x, config.grid.dye.y, config.grid.dye.z), "uvec3");
+		this.uGridNoiseSize = uniform(config.noiseTextureConfig.size, "uint");
+		this.uVolumeWorldSize = uniform(new Vector3(config.grid.world.x, config.grid.world.y, config.grid.world.z));
 		this.worldMatrix = uniform(config.world.matrixWorld);
 		this.invWorldMatrix = uniform(config.world.matrixWorld.invert());
 
-		// const phyCoord = getVoxelCoord(instanceIndex, config.grid.phy);
-		// const dyeCoord = getVoxelCoord(instanceIndex, config.grid.dye);
 		const phyCoord = globalId;
 		const dyeCoord = globalId;
 
-		this.dyeVoxelSizeWorld = new Vector3().copy(config.grid.world).divide(config.grid.dye);
-
-		//this.emitKernelRadius = Math.max(1, Math.ceil(config.vertexEmissionWorldRadius / this.dyeVoxelSizeWorld));
-		this.uVertexSplatBrushOffsets = uniformArray<"ivec4">([new Vector4()]);
-		this.uVertexSplatBrushOffsetsCount = uniform(0, "uint");
-		this.uEmitRadiusWorld = uniform(0, "float");
-
 		this.grid = {
 			phy: {
-				size: config.grid.phy,
+				size: this.uGridPhySize,
 				coord: phyCoord,
-				uvw: gridCoordToUVW(phyCoord, config.grid.phy),
-				texel: {
-					x: 1 / config.grid.phy.x,
-					y: 1 / config.grid.phy.y,
-					z: 1 / config.grid.phy.z,
-				},
-				count: config.grid.phy.x * config.grid.phy.y * config.grid.phy.z,
+				uvw: gridCoordToUVW(phyCoord, this.uGridPhySize),
+				texel: uniform(new Vector3(1 / config.grid.phy.x, 1 / config.grid.phy.y, 1 / config.grid.phy.z)),
 			},
 			dye: {
-				size: config.grid.dye,
+				size: this.uGridDyeSize,
 				coord: dyeCoord,
-				uvw: gridCoordToUVW(dyeCoord, config.grid.dye),
-				texel: {
-					x: 1 / config.grid.dye.x,
-					y: 1 / config.grid.dye.y,
-					z: 1 / config.grid.dye.z,
-				},
-				count: config.grid.dye.x * config.grid.dye.y * config.grid.dye.z,
+				uvw: gridCoordToUVW(dyeCoord, this.uGridDyeSize),
+				texel: uniform(new Vector3(1 / config.grid.dye.x, 1 / config.grid.dye.y, 1 / config.grid.dye.z)),
 			},
 			world: {
-				size: config.grid.world,
+				size: this.uVolumeWorldSize,
 			},
 		};
-
-		this.uVolumeWorldSize = uniform(new Vector3(config.grid.world.x, config.grid.world.y, config.grid.world.z));
 
 		this.texture = {
 			curlNoise: makeDataTexture(
@@ -334,26 +333,14 @@ export class EasyFireShaderContext {
 				B: makeDataTexture("pressB", config.grid.phy, { format: RedFormat }),
 			},
 			vorticity: makeDataTexture("vorticity", config.grid.phy),
-			// detailNoise: makeDataTexture(
-			// 	"detailNoise",
-			// 	{
-			// 		x: config.noiseTextureConfig.size,
-			// 		y: config.noiseTextureConfig.size,
-			// 		z: config.noiseTextureConfig.size,
-			// 	},
-			// 	{ wrap: RepeatWrapping, format: RedFormat },
-			// ),
+			sdf: makeDataTexture("sdf", config.grid.phy),
+			sdfVelocities: makeDataTexture("sdfVelocities", config.grid.phy),
 		};
 
 		/**
 		 * textures for the object collider...
 		 */
-		this.collisions.setBakeTexture(
-			// normal + dist
-			makeDataTexture("sdf", config.grid.phy),
-			//
-			makeDataTexture("sdfVelocity", config.grid.phy),
-		);
+		this.collisions.setBakeTexture(this.texture.sdf, this.texture.sdfVelocities);
 	}
 
 	insideBoundingVolume(worldPos: Node<"vec3">, callMe: (uvw: Node<"vec3">) => void) {
@@ -389,7 +376,8 @@ export class EasyFireShaderContext {
 			.toVar();
 
 		// 1) Domain Warping
-		const noiseDistortion = textures.velocity.sample(uvw)
+		const noiseDistortion = textures.velocity
+			.sample(uvw)
 			.xyz.div(this.uVolumeWorldSize)
 			.mul(0.35)
 			.mul(this.uTurbulence);

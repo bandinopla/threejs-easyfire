@@ -27,9 +27,9 @@ export const curlNoisePass = (
 	// 2. Work directly with globalId, scaled by world size / grid resolution
 	// This replaces uvw and p entirely in one step:
 	const worldSizeRatio = vec3(
-		context.grid.world.size.x / context.grid.world.size.y,
+		context.grid.world.size.x.div(context.grid.world.size.y),
 		1.0,
-		context.grid.world.size.z / context.grid.world.size.y,
+		context.grid.world.size.z.div(context.grid.world.size.y),
 	);
 
 	// Convert globalId to float vector, divide by grid resolution, and scale by world aspect ratio

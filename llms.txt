@@ -44,6 +44,11 @@ Then to plug them you do that in the config object of EasyFire on the property c
 ## Complex colliders
 Say you want to make a hand interact with the fire. You can attach to each finger basic colliders such as shapes or cubes to the bones of some armature, and the simulation will internally match the positions of each proxy collider object!
 
+## Change resolution
+To change the resolution of the textures you can call:
+1. `instance.setRenderGridResolution({x:1,y:2,z:3})` - this is the color grid basically. 2 textures use this grid.
+2. `instance.setPhysicsGridResolution({x:1,y:2,z:3})` - this is the physics grid. 8 textures use this grid.
+3. `instance.setNoiseGridResolution({x:1,y:2,z:3})` - this is the noise grid. 1 texture use this grid.
 
 
 # Info for devs

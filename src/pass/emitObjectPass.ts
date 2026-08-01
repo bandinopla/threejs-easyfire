@@ -21,20 +21,21 @@ import {
 	vec4,
 } from "three/tsl";
 
-export const emitObjectPassFragment = (
-	context: EasyFireShaderContext,
-	textures: {
-		dyeIn: DataTexture;
-		dyeOut: DataTexture;
-	}
-): ComputeNodeHook =>
+export const emitObjectPassFragment =
+	(
+		context: EasyFireShaderContext,
+		textures: {
+			dyeIn: DataTexture;
+			dyeOut: DataTexture;
+		},
+	): ComputeNodeHook =>
 	(vertexPos, worldPos, emitMultiplier, worldMatrix, objVelData, tintFactor) => {
 		context.insideBoundingVolume(worldPos, (uvw) => {
 			const grid = context.grid.dye;
-			const gridDims = uvec3(grid.size.x, grid.size.y, grid.size.z);
+			const gridDims = uvec3(grid.size);
 			const centerCoord = uvec3(uvw.mul(gridDims));
-			const voxelSizeWorld = context.uVolumeWorldSize.div(gridDims);
-			const invGridDims = vec3(1.0).div(gridDims);
+			//const voxelSizeWorld = context.uVolumeWorldSize.div(gridDims);
+			//const invGridDims = vec3(1.0).div(gridDims);
 
 			const baseEmission = context.uEmitTemperature.greaterThan(0.0).select(float(1.0), float(0.0));
 			const emissionFactor = baseEmission.mul(emitMultiplier);
@@ -73,17 +74,18 @@ export const emitObjectPassFragment = (
 		});
 	};
 
-export const emitObjectsVelocityAndDyePassFragment = (
-	context: EasyFireShaderContext,
-	textures: {
-		velocity: DataTexture;
-	}
-): ComputeNodeHook =>
+export const emitObjectsVelocityAndDyePassFragment =
+	(
+		context: EasyFireShaderContext,
+		textures: {
+			velocity: DataTexture;
+		},
+	): ComputeNodeHook =>
 	(vertexPos, worldPos, emitMultiplier, worldMatrix, objVelData) => {
 		//
 		context.insideBoundingVolume(worldPos, (uvw) => {
 			const grid = context.grid.phy;
-			const coord = uvec3(uvw.mul(vec3(grid.size.x, grid.size.y, grid.size.z)));
+			const coord = uvec3(uvw.mul(grid.size));
 
 			const objVelocity = objVelData.xyz;
 			const objSpeed = objVelData.w;

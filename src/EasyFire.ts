@@ -57,6 +57,7 @@ import {
 	textureStore,
 	uniform,
 	uniformArray,
+	uvec3,
 	vec3,
 	vec4,
 } from "three/tsl";
@@ -71,6 +72,7 @@ import {
 	StorageBufferAttribute,
 	UniformArrayNode,
 	UniformNode,
+	ComputeNode,
 } from "three/webgpu";
 import { EmitterManager, EmitterObjectDef, EmitterOptions } from "./EmitterManager";
 import { createStorage3D } from "./util/createStorage3D";
@@ -194,21 +196,6 @@ export class EasyFire extends Object3D {
 	 */
 	readonly shaderContext: EasyFireShaderContext;
 
-	/**
-	 * Textures slot mapping used in the simulation
-	 */
-	readonly textures: {
-		curlNoise: DataTexture;
-		velA: DataTexture;
-		velB: DataTexture;
-		dyeA: DataTexture;
-		dyeB: DataTexture;
-		divergence: DataTexture;
-		pressA: DataTexture;
-		pressB: DataTexture;
-		vorticity: DataTexture;
-	};
-
 	public simulate: boolean = true;
 	public simulationSpeed = 2;
 
@@ -241,6 +228,29 @@ export class EasyFire extends Object3D {
 	private uTintBlendRange = uniform(new Vector2(0.01, 0.1)); // Smooth transition range for colorMass/special tints
 
 	private collisions: CollisionHandler;
+
+	/**
+	 * Resolution of the 3D textures used for color.
+	 * (2) textures use this resolution.
+	 */
+	readonly setRenderGridResolution: (size: Vector3Like) => void;
+
+	/**
+	 * Resolution of the 3D textures used for physics
+	 * (8) textures use this resolution
+	 */
+	readonly setPhysicsGridResolution: (size: Vector3Like) => void;
+
+	/**
+	 * Resolution of the noise texture
+	 * (1) texture use this resolution
+	 */
+	readonly setNoiseGridResolution: (size: number) => void;
+
+	/**
+	 * Size of the volume mesh used to render the simulation.
+	 */
+	readonly setWorldSize: (size: Vector3Like) => void;
 
 	constructor(renderer: WebGPURenderer, config: Partial<EasyFireConfig> = {}) {
 		super();
@@ -373,7 +383,7 @@ export class EasyFire extends Object3D {
 			collisions: this.collisions,
 		});
 
-		this.textures = {
+		const textures = {
 			curlNoise: this.shaderContext.texture.curlNoise,
 			velA: this.shaderContext.texture.vel.A,
 			velB: this.shaderContext.texture.vel.B,
@@ -383,151 +393,258 @@ export class EasyFire extends Object3D {
 			pressA: this.shaderContext.texture.press.A,
 			pressB: this.shaderContext.texture.press.B,
 			vorticity: this.shaderContext.texture.vorticity,
+			sdf: this.shaderContext.texture.sdf,
+			sdfVelocities: this.shaderContext.texture.sdfVelocities,
 		};
-
-		this.vertexEmissionRadius = cfg.vertexEmissionWorldRadius;
-
-		// 1. Workgroup size per 3D block (4x4x4 = 64 threads)
-		const WORKGROUP_3D = [4, 4, 4];
-		// // 2. Number of workgroups to dispatch on X, Y, Z
-		const PHYS_DISPATCH = [
-			Math.ceil(cfg.size.physicsResolution.x / WORKGROUP_3D[0]), // 64 / 4 = 16
-			Math.ceil(cfg.size.physicsResolution.y / WORKGROUP_3D[1]), // 64 / 4 = 16
-			Math.ceil(cfg.size.physicsResolution.z / WORKGROUP_3D[2]), // 64 / 4 = 16
-		];
-		const DYE_DISPATCH = [
-			Math.ceil(cfg.size.renderResolution.x / WORKGROUP_3D[0]), // 100 / 4 = 25
-			Math.ceil(cfg.size.renderResolution.y / WORKGROUP_3D[1]), // 100 / 4 = 25
-			Math.ceil(cfg.size.renderResolution.z / WORKGROUP_3D[2]), // 100 / 4 = 25
-		];
-		const NOISE_DISPATCH = [
-			Math.ceil(cfg.noise.size / WORKGROUP_3D[0]),
-			Math.ceil(cfg.noise.size / WORKGROUP_3D[1]),
-			Math.ceil(cfg.noise.size / WORKGROUP_3D[2]),
-		];
 
 		//
 		// Simulation's shader passes
 		//
 
-		const phyGridRes = cfg.size.physicsResolution;
-		const dyeGridRes = cfg.size.renderResolution;
-
-		const inBoundsRun = (name: string, grid: Vector3Like, DISPATCH: number[], execPass: VoidFunction) => {
-			return Fn(() => {
-				const coord = globalId;
-				const gridResolution = ivec3(grid.x, grid.y, grid.z);
-				If(
-					coord.x
-						.lessThan(0)
-						.or(coord.x.greaterThanEqual(gridResolution.x))
-						.or(coord.y.lessThan(0).or(coord.y.greaterThanEqual(gridResolution.y)))
-						.or(coord.z.lessThan(0).or(coord.z.greaterThanEqual(gridResolution.z))),
-					() => {
-						Return();
-					},
-				);
-				execPass();
-			})()
-				.compute(DISPATCH as any, WORKGROUP_3D)
-				.setName(name);
+		const inBoundsRun = (name: string, grid: Node<"uvec3">, /*DISPATCH: number[],*/ execPass: VoidFunction) => {
+			return (
+				Fn(() => {
+					const coord = globalId;
+					const gridResolution = grid;
+					If(
+						coord.x
+							.lessThan(0)
+							.or(coord.x.greaterThanEqual(gridResolution.x))
+							.or(coord.y.lessThan(0).or(coord.y.greaterThanEqual(gridResolution.y)))
+							.or(coord.z.lessThan(0).or(coord.z.greaterThanEqual(gridResolution.z))),
+						() => {
+							Return();
+						},
+					);
+					execPass();
+				})()
+					//.compute(DISPATCH as any, WORKGROUP_3D)
+					.setName(name)
+			);
 		};
 
-		const computeShaders = {
-			vorticityPass: inBoundsRun("Vorticity", phyGridRes, PHYS_DISPATCH, vorticityPass(this.shaderContext, {
-				velocity: this.textures.velA,
-				vorticity: this.textures.vorticity,
-			})),
+		const shaders = {
+			vorticityPass: inBoundsRun(
+				"Vorticity",
+				this.shaderContext.uGridPhySize,
+				//PHYS_DISPATCH,
+				vorticityPass(this.shaderContext, {
+					velocity: textures.velA,
+					vorticity: textures.vorticity,
+				}),
+			),
 
 			bakeColliders: inBoundsRun(
-				"Bake Colliders",
-				phyGridRes,
-				PHYS_DISPATCH,
+				"BakeColliders",
+				this.shaderContext.uGridPhySize,
+				//PHYS_DISPATCH,
 				this.collisions.bakeCollidersPass(this.shaderContext),
 			),
 
 			curlPassCompute: inBoundsRun(
-				"Curl Noise",
-				{ x: cfg.noise.size, y: cfg.noise.size, z: cfg.noise.size },
-				NOISE_DISPATCH,
+				"CurlNoise",
+				uvec3(this.shaderContext.uGridNoiseSize), //{ x: cfg.noise.size, y: cfg.noise.size, z: cfg.noise.size },
+				//NOISE_DISPATCH,
 				curlNoisePass(this.shaderContext, {
-					curlNoise: this.textures.curlNoise,
+					curlNoise: textures.curlNoise,
 				}),
 			),
 
 			advectPassCompute: inBoundsRun(
-				"Advect Velocity",
-				phyGridRes,
-				PHYS_DISPATCH,
+				"AdvectVelocity",
+				this.shaderContext.uGridPhySize,
+				//PHYS_DISPATCH,
 				advectVelocityPass(this.shaderContext, {
-					velocity: this.textures.velA,
-					dye: this.textures.dyeA,
-					curlNoise: this.textures.curlNoise,
-					vorticity: this.textures.vorticity,
-					velocityOut: this.textures.velB,
+					velocity: textures.velA,
+					dye: textures.dyeA,
+					curlNoise: textures.curlNoise,
+					vorticity: textures.vorticity,
+					velocityOut: textures.velB,
 				}),
 			),
 
-			divPassCompute: inBoundsRun("Divergence", phyGridRes, PHYS_DISPATCH, divergencePass(this.shaderContext, {
-				velocity: this.textures.velB,
-				divergence: this.textures.divergence,
-			})),
+			divPassCompute: inBoundsRun(
+				"Divergence",
+				this.shaderContext.uGridPhySize,
+				//PHYS_DISPATCH,
+				divergencePass(this.shaderContext, {
+					velocity: textures.velB,
+					divergence: textures.divergence,
+				}),
+			),
 
 			jacobiPassABCompute: inBoundsRun(
 				"jacobiABCompute",
-				phyGridRes,
-				PHYS_DISPATCH,
+				this.shaderContext.uGridPhySize,
+				//PHYS_DISPATCH,
 				jacobiPass(this.shaderContext, {
-					pressureIn: this.textures.pressA,
-					pressureOut: this.textures.pressB,
-					divergence: this.textures.divergence,
+					pressureIn: textures.pressA,
+					pressureOut: textures.pressB,
+					divergence: textures.divergence,
 				}),
 			),
 
 			jacobiPassBACompute: inBoundsRun(
 				"jacobiBACompute",
-				phyGridRes,
-				PHYS_DISPATCH,
+				this.shaderContext.uGridPhySize,
+				//PHYS_DISPATCH,
 				jacobiPass(this.shaderContext, {
-					pressureIn: this.textures.pressB,
-					pressureOut: this.textures.pressA,
-					divergence: this.textures.divergence,
+					pressureIn: textures.pressB,
+					pressureOut: textures.pressA,
+					divergence: textures.divergence,
 				}),
 			),
 
-			projectCompute: inBoundsRun("Project", phyGridRes, PHYS_DISPATCH, projectPass(this.shaderContext, {
-				pressure: this.textures.pressA,
-				velocityIn: this.textures.velB,
-				velocityOut: this.textures.velA,
-			})),
+			projectCompute: inBoundsRun(
+				"Project",
+				this.shaderContext.uGridPhySize,
+				//PHYS_DISPATCH,
+				projectPass(this.shaderContext, {
+					pressure: textures.pressA,
+					velocityIn: textures.velB,
+					velocityOut: textures.velA,
+				}),
+			),
 
-			advectDyeCompute: inBoundsRun("Advect Dye", dyeGridRes, DYE_DISPATCH, advectDyePass(this.shaderContext, {
-				velocity: this.textures.velA,
-				dyeIn: this.textures.dyeA,
-				dyeOut: this.textures.dyeB,
-			})),
+			advectDyeCompute: inBoundsRun(
+				"AdvectDye",
+				this.shaderContext.uGridDyeSize,
+				//DYE_DISPATCH,
+				advectDyePass(this.shaderContext, {
+					velocity: textures.velA,
+					dyeIn: textures.dyeA,
+					dyeOut: textures.dyeB,
+				}),
+			),
 
 			objectsPassCompute: this.objectsManager
-				.computeNodePerVertex(emitObjectPassFragment(this.shaderContext, {
-					dyeIn: this.textures.dyeA,
-					dyeOut: this.textures.dyeB,
-				}))
+				.computeNodePerVertex(
+					emitObjectPassFragment(this.shaderContext, {
+						dyeIn: textures.dyeA,
+						dyeOut: textures.dyeB,
+					}),
+				)
 				.setName("emit Ojects"),
 
 			emitObjectsVelocityAndDyePass: this.objectsManager
-				.computeNodePerVertex(emitObjectsVelocityAndDyePassFragment(this.shaderContext, {
-					velocity: this.textures.velB,
-				}))
+				.computeNodePerVertex(
+					emitObjectsVelocityAndDyePassFragment(this.shaderContext, {
+						velocity: textures.velB,
+					}),
+				)
 				.setName("emitVelocityAndDye"),
 		};
+
+		// 1. Workgroup size per 3D block (4x4x4 = 64 threads)
+		const WORKGROUP_3D = [4, 4, 4];
+
+		//@ts-ignore
+		let computeShaders: { [K in keyof typeof shaders]: ComputeNode } = {
+			emitObjectsVelocityAndDyePass: shaders.emitObjectsVelocityAndDyePass,
+			objectsPassCompute: shaders.objectsPassCompute,
+		};
+
+		/**
+		 * Based on the resolutions, compute the shaders.
+		 * @param kind
+		 * @param resizeTextures
+		 * @returns
+		 */
+		const computeTheShaders: (
+			kind: "phy" | "dye" | "noise" | "all",
+			resizeTextures: boolean,
+		) => { [K in keyof typeof shaders]: ComputeNode } = (kind, resizeTextures = true) => {
+			const out = computeShaders ?? {};
+
+			if (kind === "phy" || kind === "all") {
+				const phy = this.shaderContext.uGridPhySize.value;
+
+				// // 2. Number of workgroups to dispatch on X, Y, Z
+				const PHYS_DISPATCH = [
+					Math.ceil(phy.x / WORKGROUP_3D[0]), // 64 / 4 = 16
+					Math.ceil(phy.y / WORKGROUP_3D[1]), // 64 / 4 = 16
+					Math.ceil(phy.z / WORKGROUP_3D[2]), // 64 / 4 = 16
+				];
+
+				if (resizeTextures) {
+					textures.velA.resize(phy);
+					textures.velB.resize(phy);
+					textures.divergence.resize(phy);
+					textures.pressA.resize(phy);
+					textures.pressB.resize(phy);
+					textures.vorticity.resize(phy);
+					textures.sdf.resize(phy);
+					textures.sdfVelocities.resize(phy);
+				}
+				out.vorticityPass = shaders.vorticityPass.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+				out.bakeColliders = shaders.bakeColliders.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+
+				out.advectPassCompute = shaders.advectPassCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+				out.divPassCompute = shaders.divPassCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+				out.jacobiPassABCompute = shaders.jacobiPassABCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+				out.jacobiPassBACompute = shaders.jacobiPassBACompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+				out.projectCompute = shaders.projectCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+			}
+
+			if (kind == "dye" || kind == "all") {
+				const dye = this.shaderContext.uGridDyeSize.value;
+
+				if (resizeTextures) {
+					textures.dyeA.resize(dye);
+					textures.dyeB.resize(dye);
+				}
+				const DYE_DISPATCH = [
+					Math.ceil(dye.x / WORKGROUP_3D[0]), // 100 / 4 = 25
+					Math.ceil(dye.y / WORKGROUP_3D[1]), // 100 / 4 = 25
+					Math.ceil(dye.z / WORKGROUP_3D[2]), // 100 / 4 = 25
+				];
+				out.advectDyeCompute = shaders.advectDyeCompute.compute(DYE_DISPATCH as any, WORKGROUP_3D);
+			}
+
+			if (kind == "noise" || kind == "all") {
+				if (resizeTextures) {
+					textures.curlNoise.resize(this.shaderContext.uGridNoiseSize.value);
+				}
+				const NOISE_DISPATCH = [
+					Math.ceil(this.shaderContext.uGridNoiseSize.value / WORKGROUP_3D[0]),
+					Math.ceil(this.shaderContext.uGridNoiseSize.value / WORKGROUP_3D[1]),
+					Math.ceil(this.shaderContext.uGridNoiseSize.value / WORKGROUP_3D[2]),
+				];
+				out.curlPassCompute = shaders.curlPassCompute.compute(NOISE_DISPATCH as any, WORKGROUP_3D);
+			}
+
+			return out;
+		};
+
+		computeShaders = computeTheShaders("all", false);
+
+		this.setRenderGridResolution = (size) => {
+			this.config.size.renderResolution = size;
+			this.shaderContext.uGridDyeSize.value = new Vector3(size.x, size.y, size.z);
+			this.shaderContext.grid.dye.texel.value = new Vector3(1, 1, 1).divide(size);
+			computeShaders = computeTheShaders("dye", true);
+		};
+
+		this.setPhysicsGridResolution = (size) => {
+			this.config.size.physicsResolution = size;
+			this.shaderContext.uGridPhySize.value = new Vector3(size.x, size.y, size.z);
+			computeShaders = computeTheShaders("phy", true);
+		};
+
+		this.setNoiseGridResolution = (size) => {
+			this.config.noise.size = size;
+			this.shaderContext.noiseTextureConfig.size = size;
+			computeShaders = computeTheShaders("noise", true);
+		};
+
 		//--------------------------------------------------------------------------------------------------------------------------
 
 		// 2. Define the TSL function to take the ray position as an argument
 		// In TSL, fn() arguments are passed as an array to the callback
 		const calculateScattering = Fn(([posRay]: [Node<"vec3">]) => {
 			const { density, temperature, colorMass, bboxPosition, uvw } = this.shaderContext.sampleVolumeAt(posRay, {
-				velocity: this.textures.velA,
-				dye: this.textures.dyeA,
+				velocity: textures.velA,
+				dye: textures.dyeA,
 			});
 
 			//const crispDensity = smoothstep(0.05, 0.35, density);
@@ -583,7 +700,7 @@ export class EasyFire extends Object3D {
 			const outColor = normalColor.toVar();
 
 			If(colorMass.greaterThan(0.1), () => {
-				outColor.assign(vec3(normalColor.length()).mul(specialColor));
+				outColor.assign(vec3(normalColor.length()).mul(specialColor).mul(this.uSpecialColorMultiplier));
 			});
 
 			if (this.config.debug.renderColliders) this.shaderContext.collisions.drawDebugShapes(outColor, uvw);
@@ -599,7 +716,7 @@ export class EasyFire extends Object3D {
 				.add(0.5)
 				.toVar();
 
-			return this.textures.curlNoise.sample(uvw);
+			return textures.curlNoise.sample(uvw);
 		});
 
 		//// interesting pattern...
@@ -631,11 +748,7 @@ export class EasyFire extends Object3D {
 		this.volumetricMaterial = volumetricMaterial;
 
 		const volumetricMesh = new Mesh(
-			new BoxGeometry(
-				this.shaderContext.grid.world.size.x,
-				this.shaderContext.grid.world.size.y,
-				this.shaderContext.grid.world.size.z,
-			),
+			new BoxGeometry(cfg.size.boundingBox.x, cfg.size.boundingBox.y, cfg.size.boundingBox.z),
 			volumetricMaterial,
 		);
 		volumetricMesh.receiveShadow = true;
@@ -643,6 +756,12 @@ export class EasyFire extends Object3D {
 		volumetricMesh.layers.enable(cfg.renderLayer);
 		volumetricMesh.frustumCulled = false;
 		this.add(volumetricMesh);
+
+		this.setWorldSize = (newSize) => {
+			this.shaderContext.uVolumeWorldSize.value.copy(newSize);
+			volumetricMesh.geometry.dispose();
+			volumetricMesh.geometry = new BoxGeometry(newSize.x, newSize.y, newSize.z);
+		};
 
 		fireConfigToFireHandler.set(this.config, this);
 
@@ -911,33 +1030,6 @@ export class EasyFire extends Object3D {
 		this.uTemperatureAtMaxColor.value = value;
 	}
 
-	get vertexEmissionRadius() {
-		return this.config.vertexEmissionWorldRadius;
-	}
-
-	set vertexEmissionRadius(value: number) {
-		this.config.vertexEmissionWorldRadius = value;
-
-		const k = new Vector3(13, 13, 13); // new Vector3(value, value, value).divide(this.shaderContext.dyeVoxelSizeWorld).ceil(); //Math.ceil(value / this.shaderContext.dyeVoxelSizeWorld);
-		//const k = new Vector3(value, value, value).divide(this.shaderContext.dyeVoxelSizeWorld).ceil(); //Math.ceil(value / this.shaderContext.dyeVoxelSizeWorld);
-		const radiusSq = k.lengthSq();
-		const offsets: [number, number, number, number][] = [];
-
-		// console.log(k);
-		// return;
-
-		for (let dx = -k.x; dx <= k.x; dx++)
-			for (let dy = -k.y; dy <= k.y; dy++)
-				for (let dz = -k.z; dz <= k.z; dz++) {
-					const _radiussq = dx * dx + dy * dy + dz * dz;
-					offsets.push([dx, dy, dz, 1.0 - _radiussq / radiusSq]);
-				}
-
-		this.shaderContext.uEmitRadiusWorld.value = value; // not used
-		this.shaderContext.uVertexSplatBrushOffsetsCount.value = offsets.length;
-		this.shaderContext.uVertexSplatBrushOffsets.array = offsets.map(([x, y, z, w]) => new Vector4(x, y, z, w));
-	}
-
 	get friction() {
 		return this.collisions.uFriction.value;
 	}
@@ -967,6 +1059,13 @@ export class EasyFire extends Object3D {
 
 	set colorRadianceMultiplier(v: number) {
 		this.uRadianceMultiplier.value = v;
+	}
+
+	get specialColorMultiplier() {
+		return this.uSpecialColorMultiplier.value;
+	}
+	set specialColorMultiplier(v: number) {
+		this.uSpecialColorMultiplier.value = v;
 	}
 
 	getColor(type: FireColorType) {
@@ -1059,8 +1158,12 @@ export class EasyFire extends Object3D {
 	getSettingsSnapshot() {
 		return {
 			resolution: this.volumetricPass!.getResolutionScale(),
+			grid: {
+				world: this.shaderContext.uVolumeWorldSize.value,
+				dye: this.shaderContext.uGridDyeSize.value,
+				phy: this.shaderContext.uGridPhySize.value,
+			},
 			vorticityConfinementStrength: this.vorticityConfinementStrength,
-			vertexEmissionRadius: this.vertexEmissionRadius,
 			blurStrength: this.blurStrength,
 			steps: this.config.steps,
 			simulationSpeed: this.simulationSpeed,
@@ -1092,6 +1195,7 @@ export class EasyFire extends Object3D {
 			tier3Stop: this.getColorStop("tier3"),
 
 			temperatureAtMaxColor: this.temperatureAtMaxColor,
+			specialColorMultiplier: this.specialColorMultiplier,
 
 			timestamp: new Date().toISOString(),
 		};
@@ -1103,7 +1207,6 @@ export class EasyFire extends Object3D {
 	applySettingsSnapshot(snapshot: ReturnType<typeof this.getSettingsSnapshot>) {
 		this.vorticityConfinementStrength = snapshot.vorticityConfinementStrength;
 		this.volumetricPass!.setResolutionScale(snapshot.resolution);
-		this.vertexEmissionRadius = snapshot.vertexEmissionRadius;
 		this.config.steps = snapshot.steps;
 		this.volumetricMaterial.steps = snapshot.steps;
 		this.simulationSpeed = snapshot.simulationSpeed;
@@ -1132,20 +1235,65 @@ export class EasyFire extends Object3D {
 		this.setColorStop("tier2", snapshot.tier2Stop);
 		this.setColorStop("tier3", snapshot.tier3Stop);
 		this.colorRadianceMultiplier = snapshot.colorRadianceMultiplier;
+		this.specialColorMultiplier = snapshot.specialColorMultiplier ?? this.specialColorMultiplier;
 
 		this.temperatureAtMaxColor = snapshot.temperatureAtMaxColor;
+
+		if (snapshot.grid) {
+			this.setWorldSize(snapshot.grid.world);
+			this.setRenderGridResolution(snapshot.grid.dye);
+			this.setPhysicsGridResolution(snapshot.grid.phy);
+		}
 	}
 
 	/**
 	 * Add settings to be able to tweak the parameters of this fire simulation
 	 */
 	addSettingsToInspector(inspector: Inspector, name: string) {
+		/**
+		 * size at the time of starting this inspector. (because scale is relative to this...)
+		 */
+		const baseSize = {
+			world: this.shaderContext.uVolumeWorldSize.value.clone(),
+			phy: this.shaderContext.uGridPhySize.value.clone(),
+			dye: this.shaderContext.uGridDyeSize.value.clone(),
+		};
+
+		const scale = {
+			world: 1,
+			phy: 1,
+			dye: 1,
+		};
+
+		const loadSnapshot = (snapshot: any) => {
+			this.applySettingsSnapshot(snapshot);
+			baseSize.world.copy(this.shaderContext.uVolumeWorldSize.value);
+			baseSize.phy.copy(this.shaderContext.uGridPhySize.value);
+			baseSize.dye.copy(this.shaderContext.uGridDyeSize.value);
+			scale.dye = snapshot.scale.dye ?? 1;
+			scale.phy = snapshot.scale.phy ?? 1;
+			scale.world = snapshot.scale.world ?? 1;
+			applyScale();
+		};
+
+		const applyScale = () => {
+			this.setWorldSize(baseSize.world.clone().multiplyScalar(scale.world));
+			this.setRenderGridResolution(baseSize.dye.clone().multiplyScalar(scale.dye).ceil());
+			this.setPhysicsGridResolution(baseSize.phy.clone().multiplyScalar(scale.phy).ceil());
+		};
+
 		const restoreDevSettings = () => {
 			const saved = localStorage.getItem("easy-fire-settings");
 			if (saved) {
-				const payload = JSON.parse(saved);
-				this.applySettingsSnapshot(payload);
+				loadSnapshot(JSON.parse(saved));
 			}
+		};
+
+		const getSnapshot = () => {
+			return {
+				...this.getSettingsSnapshot(),
+				scale,
+			};
 		};
 
 		const devCommands = {
@@ -1153,13 +1301,13 @@ export class EasyFire extends Object3D {
 				window.open("https://github.com/bandinopla/threejs-easyfire", "_blank");
 			},
 			save: () => {
-				const payload = this.getSettingsSnapshot();
+				const payload = getSnapshot();
 				//save to local storage
 				localStorage.setItem("easy-fire-settings", JSON.stringify(payload));
 				alert("Settings saved to local storage! Next time you open this page, the settings will be restored.");
 			},
 			copy: () => {
-				const payload = this.getSettingsSnapshot();
+				const payload = getSnapshot();
 				navigator.clipboard.writeText(JSON.stringify(payload, undefined, 2));
 				alert(
 					"Settings copied to clipboard! You can paste them and pass them to .applySettingsSnapshot or email them to your dev.",
@@ -1167,7 +1315,7 @@ export class EasyFire extends Object3D {
 			},
 			saveToFile: () => {
 				//save to a json
-				const payload = this.getSettingsSnapshot();
+				const payload = getSnapshot();
 				const blob = new Blob([JSON.stringify(payload, undefined, 2)], { type: "application/json" });
 				const url = URL.createObjectURL(blob);
 				const a = document.createElement("a");
@@ -1187,9 +1335,8 @@ export class EasyFire extends Object3D {
 						const reader = new FileReader();
 						reader.onload = (e) => {
 							const payload = JSON.parse(e.target?.result as string);
-
 							try {
-								this.applySettingsSnapshot(payload);
+								loadSnapshot(payload);
 							} catch (error) {
 								console.error(error);
 								alert("Oops! Something went wrong while applying the settings. Check the console...");
@@ -1204,13 +1351,44 @@ export class EasyFire extends Object3D {
 
 		restoreDevSettings();
 
-		const params = this.getSettingsSnapshot();
+		const params = getSnapshot();
 
 		const gui = inspector.createParameters(name);
 
 		gui.add(devCommands, "repo").name("Repo");
 
 		gui.add(devCommands, "loadFromJson").name("Load from json file");
+
+		let scaleGizmo = new Mesh(new BoxGeometry(), new MeshBasicMaterial({ color: "yellow", wireframe: true }));
+		let timeout: number = 0;
+
+		gui.add(params.scale, "world", 0.25, 2, 0.05)
+			.onChange((value) => {
+				scale.world = value;
+				applyScale();
+
+				clearInterval(timeout);
+				scaleGizmo.scale.copy(baseSize.world).multiplyScalar(value);
+				this.add(scaleGizmo);
+				timeout = window.setTimeout(() => {
+					scaleGizmo.removeFromParent();
+				}, 500);
+			})
+			.name("World Scale");
+
+		gui.add(params.scale, "dye", 0.25, 2, 0.05)
+			.onChange((value) => {
+				scale.dye = value;
+				applyScale();
+			})
+			.name("Color Grid Scale");
+
+		gui.add(params.scale, "phy", 0.25, 2, 0.05)
+			.onChange((value) => {
+				scale.phy = value;
+				applyScale();
+			})
+			.name("Physics Grid Scale");
 
 		gui.add(params, "resolution", 0.1, 1.0, 0.05)
 			.onChange((value) => {
@@ -1234,12 +1412,6 @@ export class EasyFire extends Object3D {
 		gui.add(params, "simulationSpeed", 0.1, 4, 0.1).onChange((value) => {
 			this.simulationSpeed = value;
 		});
-
-		// const emission = gui.addFolder("Emission");
-
-		// emission.add(params, "vertexEmissionRadius", 0, 2, 0.001).onChange((value) => {
-		// 	this.vertexEmissionRadius = value;
-		// });
 
 		const colFolder = gui.addFolder("Collision");
 		const fireControls = gui.addFolder("Fire");
@@ -1330,6 +1502,10 @@ export class EasyFire extends Object3D {
 				this.temperatureAtMaxColor = value;
 			})
 			.name("Tier #3 Temperature");
+
+		emitterControls.add(params, "specialColorMultiplier", 0, 10, 0.1).onChange((value) => {
+			this.specialColorMultiplier = value;
+		});
 
 		emitterControls
 			.addColor(params, "colorBase")

@@ -33,6 +33,17 @@ The library simulates fire/smoke on a 3D voxel grid. Emitters add "dye" and temp
 
 ## Resolution
 The system uses 3 grids... one is the size of the bounding box in your 3d scene, in world units, where the simulation will take place. The other is the size of the render grid, in 3d voxels size, think of it like a Minecraft cube... and the physics is also a 3d texture. They are separated because visually, you can have a small physics voxel grid and it will save processing time and most likely it wont be that noticeable. They are separated so you can test what setup works best. 
+### Grid Sizes
+The volume has 2 voxel grids, the render grid and the physics grid, they have different purposes. When you see "voxel units" it means how many times the world volume will be sliced. 
+
+- **renderResolution**: Determines the detail of the fire, higher values = more detail.
+- **physicsResolution**: Determines the resolution of the simulation (buoyancy, vorticity, etc), higher values = more accurate simulation.
+You can programatically change the size ( but remember this will dispose the old textures and create new textures )
+```js
+myFire.setRenderGridResolution({ x:100, y:100, z: 100 }); //voxels
+myFire.setPhysicsGridResolution({ x:100, y:100, z: 100 }); //voxels
+myFire.setNoiseGridResolution(64); //64x64x64
+```
 
 ## Textures used
 Read `shader_textures_usage.md` to see what textures are used and how.

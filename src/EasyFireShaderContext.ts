@@ -57,7 +57,7 @@ const getVoxelCoord = (id: IndexNode, size: Vector3Like) => {
 	return uvec3(x, y, z);
 };
 
-const gridCoordToUVW = (coord: Node<"uvec3">, grid: Node<"uvec3">) => vec3(coord).add(0.5).div(grid.toVec3());
+const gridCoordToUVW = (coord: Node<"uvec3">, grid: Node<"uvec3">) => coord.toVec3().add(0.5).div(grid.toVec3());
 
 export type NoiseTextureConfig = {
 	size: number;

@@ -423,7 +423,29 @@ export class EasyFire extends Object3D {
 			);
 		};
 
+		const clearTextures = (textures: DataTexture[]) => (DISPATCH: number[], WORKGROUP: number[]) => {
+			textures.forEach((texture) => {
+				renderer.compute(
+					Fn(() => {
+						texture.write(globalId, vec4(0));
+					})().compute(DISPATCH as any, WORKGROUP),
+				);
+			});
+		};
 		const shaders = {
+			clearPhyTextures: clearTextures([
+				textures.velA,
+				textures.velB,
+				textures.divergence,
+				textures.pressA,
+				textures.pressB,
+				textures.vorticity,
+				textures.sdf,
+				textures.sdfVelocities,
+			]),
+
+			clearDyeTextures: clearTextures([textures.dyeA, textures.dyeB]),
+
 			vorticityPass: inBoundsRun(
 				"Vorticity",
 				this.shaderContext.uGridPhySize,
@@ -544,6 +566,21 @@ export class EasyFire extends Object3D {
 			objectsPassCompute: shaders.objectsPassCompute,
 		};
 
+		const volumetricMaterial = new VolumeNodeMaterial({
+			transparent: true,
+			blending: AdditiveBlending,
+			side: DoubleSide, // ADD THIS so you can see it while the camera is inside
+			steps: cfg.steps,
+			depthWrite: false,
+			//
+			//offsetNode: bayer16(screenCoordinate).mul(0.42),
+			offsetNode: fract(interleavedGradientNoise(screenCoordinate).add(float(frameId).mul(0.118033988749895))),
+			//offsetNode: interleavedGradientNoise(screenCoordinate),
+			//offsetNode,
+		});
+
+		let texturesResized = false;
+
 		/**
 		 * Based on the resolutions, compute the shaders.
 		 * @param kind
@@ -556,16 +593,26 @@ export class EasyFire extends Object3D {
 		) => { [K in keyof typeof shaders]: ComputeNode } = (kind, resizeTextures = true) => {
 			const out = computeShaders ?? {};
 
+			const phy = this.shaderContext.uGridPhySize.value;
+			const dye = this.shaderContext.uGridDyeSize.value;
+
+			// // 2. Number of workgroups to dispatch on X, Y, Z
+			const PHYS_DISPATCH = [
+				Math.ceil(phy.x / WORKGROUP_3D[0]), // 64 / 4 = 16
+				Math.ceil(phy.y / WORKGROUP_3D[1]), // 64 / 4 = 16
+				Math.ceil(phy.z / WORKGROUP_3D[2]), // 64 / 4 = 16
+			];
+
+			const DYE_DISPATCH = [
+				Math.ceil(dye.x / WORKGROUP_3D[0]), // 100 / 4 = 25
+				Math.ceil(dye.y / WORKGROUP_3D[1]), // 100 / 4 = 25
+				Math.ceil(dye.z / WORKGROUP_3D[2]), // 100 / 4 = 25
+			];
+
+			shaders.clearPhyTextures(PHYS_DISPATCH as any, WORKGROUP_3D);
+			shaders.clearDyeTextures(DYE_DISPATCH as any, WORKGROUP_3D);
+
 			if (kind === "phy" || kind === "all") {
-				const phy = this.shaderContext.uGridPhySize.value;
-
-				// // 2. Number of workgroups to dispatch on X, Y, Z
-				const PHYS_DISPATCH = [
-					Math.ceil(phy.x / WORKGROUP_3D[0]), // 64 / 4 = 16
-					Math.ceil(phy.y / WORKGROUP_3D[1]), // 64 / 4 = 16
-					Math.ceil(phy.z / WORKGROUP_3D[2]), // 64 / 4 = 16
-				];
-
 				if (resizeTextures) {
 					textures.velA.resize(phy);
 					textures.velB.resize(phy);
@@ -576,29 +623,47 @@ export class EasyFire extends Object3D {
 					textures.sdf.resize(phy);
 					textures.sdfVelocities.resize(phy);
 				}
-				out.vorticityPass = shaders.vorticityPass.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
-				out.bakeColliders = shaders.bakeColliders.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
-
-				out.advectPassCompute = shaders.advectPassCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
-				out.divPassCompute = shaders.divPassCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
-				out.jacobiPassABCompute = shaders.jacobiPassABCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
-				out.jacobiPassBACompute = shaders.jacobiPassBACompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
-				out.projectCompute = shaders.projectCompute.compute(PHYS_DISPATCH as any, WORKGROUP_3D);
+				out.vorticityPass = shaders.vorticityPass
+					.compute(PHYS_DISPATCH as any, WORKGROUP_3D)
+					.setName("vorticityPass");
+				out.bakeColliders = shaders.bakeColliders
+					.compute(PHYS_DISPATCH as any, WORKGROUP_3D)
+					.setName("bakeColliders");
+				out.advectPassCompute = shaders.advectPassCompute
+					.compute(PHYS_DISPATCH as any, WORKGROUP_3D)
+					.setName("advectPassCompute");
+				out.divPassCompute = shaders.divPassCompute
+					.compute(PHYS_DISPATCH as any, WORKGROUP_3D)
+					.setName("divPassCompute");
+				out.jacobiPassABCompute = shaders.jacobiPassABCompute
+					.compute(PHYS_DISPATCH as any, WORKGROUP_3D)
+					.setName("jacobiPassABCompute");
+				out.jacobiPassBACompute = shaders.jacobiPassBACompute
+					.compute(PHYS_DISPATCH as any, WORKGROUP_3D)
+					.setName("jacobiPassBACompute");
+				out.projectCompute = shaders.projectCompute
+					.compute(PHYS_DISPATCH as any, WORKGROUP_3D)
+					.setName("projectCompute");
 			}
 
 			if (kind == "dye" || kind == "all") {
-				const dye = this.shaderContext.uGridDyeSize.value;
-
 				if (resizeTextures) {
 					textures.dyeA.resize(dye);
 					textures.dyeB.resize(dye);
 				}
-				const DYE_DISPATCH = [
-					Math.ceil(dye.x / WORKGROUP_3D[0]), // 100 / 4 = 25
-					Math.ceil(dye.y / WORKGROUP_3D[1]), // 100 / 4 = 25
-					Math.ceil(dye.z / WORKGROUP_3D[2]), // 100 / 4 = 25
-				];
-				out.advectDyeCompute = shaders.advectDyeCompute.compute(DYE_DISPATCH as any, WORKGROUP_3D);
+
+				out.advectDyeCompute = shaders.advectDyeCompute
+					.compute(DYE_DISPATCH as any, WORKGROUP_3D)
+					.setName("advectDyeCompute");
+
+				out.objectsPassCompute = this.objectsManager
+					.computeNodePerVertex(
+						emitObjectPassFragment(this.shaderContext, {
+							dyeIn: textures.dyeA,
+							dyeOut: textures.dyeB,
+						}),
+					)
+					.setName("emit Ojects");
 			}
 
 			if (kind == "noise" || kind == "all") {
@@ -610,8 +675,14 @@ export class EasyFire extends Object3D {
 					Math.ceil(this.shaderContext.uGridNoiseSize.value / WORKGROUP_3D[1]),
 					Math.ceil(this.shaderContext.uGridNoiseSize.value / WORKGROUP_3D[2]),
 				];
-				out.curlPassCompute = shaders.curlPassCompute.compute(NOISE_DISPATCH as any, WORKGROUP_3D);
+				out.curlPassCompute = shaders.curlPassCompute
+					.compute(NOISE_DISPATCH as any, WORKGROUP_3D)
+					.setName("curlPassCompute");
 			}
+
+			volumetricMaterial.needsUpdate = true;
+
+			texturesResized = true;
 
 			return out;
 		};
@@ -628,6 +699,7 @@ export class EasyFire extends Object3D {
 		this.setPhysicsGridResolution = (size) => {
 			this.config.size.physicsResolution = size;
 			this.shaderContext.uGridPhySize.value = new Vector3(size.x, size.y, size.z);
+			this.shaderContext.grid.phy.texel.value = new Vector3(1, 1, 1).divide(size);
 			computeShaders = computeTheShaders("phy", true);
 		};
 
@@ -727,23 +799,10 @@ export class EasyFire extends Object3D {
 		// Shift the pattern over time
 		//const offsetNode = fract(blobPattern.add(float(frameId).mul(0.02)));
 
-		const volumetricMaterial = new VolumeNodeMaterial({
-			transparent: true,
-			blending: AdditiveBlending,
-			side: DoubleSide, // ADD THIS so you can see it while the camera is inside
-			steps: cfg.steps,
-			depthWrite: false,
-			//
-			//offsetNode: bayer16(screenCoordinate).mul(0.42),
-			offsetNode: fract(interleavedGradientNoise(screenCoordinate).add(float(frameId).mul(0.118033988749895))),
-			//offsetNode: interleavedGradientNoise(screenCoordinate),
-			//offsetNode,
-
-			scatteringNode: ({ positionRay }) => {
-				// We pass the raymarching position into our custom TSL function
-				return this.config.debug.noise ? renderNoiseTexture(positionRay) : calculateScattering(positionRay);
-			},
-		});
+		volumetricMaterial.scatteringNode = ({ positionRay }) => {
+			// We pass the raymarching position into our custom TSL function
+			return this.config.debug.noise ? renderNoiseTexture(positionRay) : calculateScattering(positionRay);
+		};
 
 		this.volumetricMaterial = volumetricMaterial;
 
@@ -832,6 +891,11 @@ export class EasyFire extends Object3D {
 				}
 
 				if (this.config.debug.noise) return;
+
+				if (texturesResized) {
+					texturesResized = false;
+					return;
+				}
 
 				this.shaderContext.worldMatrix.value = this.matrixWorld;
 
@@ -1276,7 +1340,14 @@ export class EasyFire extends Object3D {
 			applyScale();
 		};
 
-		const applyScale = () => {
+		let scaleTimeout = 0;
+		const applyScale = (debounce = false) => {
+			if (debounce) {
+				clearTimeout(scaleTimeout);
+				scaleTimeout = window.setTimeout(applyScale, 300);
+				return;
+			}
+
 			this.setWorldSize(baseSize.world.clone().multiplyScalar(scale.world));
 			this.setRenderGridResolution(baseSize.dye.clone().multiplyScalar(scale.dye).ceil());
 			this.setPhysicsGridResolution(baseSize.phy.clone().multiplyScalar(scale.phy).ceil());
@@ -1365,7 +1436,7 @@ export class EasyFire extends Object3D {
 		gui.add(params.scale, "world", 0.25, 2, 0.05)
 			.onChange((value) => {
 				scale.world = value;
-				applyScale();
+				applyScale(true);
 
 				clearInterval(timeout);
 				scaleGizmo.scale.copy(baseSize.world).multiplyScalar(value);
@@ -1379,14 +1450,14 @@ export class EasyFire extends Object3D {
 		gui.add(params.scale, "dye", 0.25, 2, 0.05)
 			.onChange((value) => {
 				scale.dye = value;
-				applyScale();
+				applyScale(true);
 			})
 			.name("Color Grid Scale");
 
 		gui.add(params.scale, "phy", 0.25, 2, 0.05)
 			.onChange((value) => {
 				scale.phy = value;
-				applyScale();
+				applyScale(true);
 			})
 			.name("Physics Grid Scale");
 

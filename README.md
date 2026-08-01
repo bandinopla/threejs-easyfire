@@ -158,6 +158,19 @@ myFire.addSettingsToInspector(renderer.inspector as Inspector, "Fire's Settings"
 ```
 And vía the buttons provided there, download the json settins or copy them to clipboard, then...
 
+## Grid Sizes
+The volume has 2 voxel grids, the render grid and the physics grid, they have different purposes. When you see "voxel units" it means how many times the world volume will be sliced. 
+
+- **renderResolution**: in voxel units. Determines the detail of the fire, higher values = more detail.
+- **physicsResolution**: in voxel units. Determines the resolution of the simulation (buoyancy, vorticity, etc), higher values = more accurate simulation.
+You can programatically change the size ( but remember this will dispose the old textures and create new textures )
+```js
+myFire.setRenderGridResolution({ x:100, y:100, z: 100 }); //voxels
+myFire.setPhysicsGridResolution({ x:100, y:100, z: 100 }); //voxels
+myFire.setNoiseGridResolution(64); //64x64x64
+```
+
+
 ## Restore settings
 ```js
 // call this AFTER having called the myFire.getRenderPass(...) or it will throw error.

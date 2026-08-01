@@ -14,17 +14,17 @@ export default defineConfig({
 			entry: path.resolve(__dirname, "src/index.ts"),
 			name: "ThreejsEasyFire",
 			fileName: "threejs-easyfire",
-			formats: ["es", "umd"],
+			formats: ["es"],
 		},
 		rollupOptions: {
 			// Ensure peer dependencies are not bundled
 			//external: ["three", "three/webgpu", "three/tsl", "three/examples"],
 			external: [/^three($|\/)/],
-			output: {
-				globals: {
-					three: "THREE",
-				},
-			},
+			// output: {
+			// 	globals: {
+			// 		three: "THREE",
+			// 	},
+			// },
 		},
 		outDir: path.resolve(__dirname, "dist"),
 		minify: true,

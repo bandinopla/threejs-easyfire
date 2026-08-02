@@ -69,6 +69,7 @@ export type VoxelGrid = {
 	readonly coord: Node<"uvec3">;
 	readonly uvw: Node<"vec3">;
 	readonly texel: UniformNode<"vec3", Vector3>;
+	readonly worldTexelSizeX2: UniformNode<"vec3", Vector3>;
 	//readonly count: number;
 };
 
@@ -179,7 +180,7 @@ export class EasyFireShaderContext {
 	 */
 	readonly uCooling = uniform(0.21);
 
-	readonly uEmitDensity = uniform(20);
+	readonly uEmitDensity = uniform(0.01);
 	readonly uEmitTemperature = uniform(15.5);
 
 	/**
@@ -290,12 +291,18 @@ export class EasyFireShaderContext {
 				coord: phyCoord,
 				uvw: gridCoordToUVW(phyCoord, this.uGridPhySize),
 				texel: uniform(new Vector3(1 / config.grid.phy.x, 1 / config.grid.phy.y, 1 / config.grid.phy.z)),
+				worldTexelSizeX2: uniform(
+					this.uVolumeWorldSize.value.clone().divide(this.uGridPhySize.value).multiplyScalar(2),
+				),
 			},
 			dye: {
 				size: this.uGridDyeSize,
 				coord: dyeCoord,
 				uvw: gridCoordToUVW(dyeCoord, this.uGridDyeSize),
 				texel: uniform(new Vector3(1 / config.grid.dye.x, 1 / config.grid.dye.y, 1 / config.grid.dye.z)),
+				worldTexelSizeX2: uniform(
+					this.uVolumeWorldSize.value.clone().divide(this.uGridDyeSize.value).multiplyScalar(2),
+				),
 			},
 			world: {
 				size: this.uVolumeWorldSize,

@@ -45,7 +45,8 @@ export const emitObjectPassFragment =
 			const motionVec = objVelocity.mul(context.uDt); // Vector from prev -> current pos
 
 			// Instant ignition density boost
-			const densityBaseVal = context.uEmitDensity.mul(float(1 / 20)).mul(emissionFactor);
+			//const densityBaseVal = context.uEmitDensity.mul(float(1 / 20)).mul(emissionFactor);
+			const densityBaseVal = context.uEmitDensity.mul(0.2).mul(emissionFactor);
 			const tempBaseVal = context.uEmitTemperature.mul(0.05);
 
 			If(densityBaseVal.greaterThan(0.0), () => {
@@ -54,7 +55,7 @@ export const emitObjectPassFragment =
 				const addedDensity = densityBaseVal.mul(1);
 				const addedTemp = tempBaseVal.mul(1);
 
-				const newDensity = currentDye.r.add(addedDensity).clamp(0, 1); // Clamped to 5.0 as you had in your edit
+				const newDensity = currentDye.r.add(addedDensity); // Clamped to 5.0 as you had in your edit
 				const newTemp = currentDye.g.add(addedTemp);
 
 				const addedColorMass = addedDensity.mul(tintFactor);

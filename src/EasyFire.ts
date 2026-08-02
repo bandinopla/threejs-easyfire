@@ -95,6 +95,20 @@ import { vorticityPass } from "./pass/vorticityPass";
 
 export type FireColorStopType = "tier1" | "tier2" | "tier3";
 export type FireColorType = "base" | FireColorStopType | "special";
+type InspectorProps = {
+	inspector?: {
+		scale: {
+			phy: number;
+			dye: number;
+			world: number;
+		};
+		baseSize: {
+			phy: Vector3Like;
+			dye: Vector3Like;
+			world: Vector3Like;
+		};
+	};
+};
 
 export type TemperatureColor = {
 	color: Color;
@@ -693,6 +707,10 @@ export class EasyFire extends Object3D {
 			this.config.size.renderResolution = size;
 			this.shaderContext.uGridDyeSize.value = new Vector3(size.x, size.y, size.z);
 			this.shaderContext.grid.dye.texel.value = new Vector3(1, 1, 1).divide(size);
+			this.shaderContext.grid.dye.worldTexelSizeX2.value = this.shaderContext.uVolumeWorldSize.value
+				.clone()
+				.divide(this.shaderContext.uGridDyeSize.value)
+				.multiplyScalar(2);
 			computeShaders = computeTheShaders("dye", true);
 		};
 
@@ -700,6 +718,10 @@ export class EasyFire extends Object3D {
 			this.config.size.physicsResolution = size;
 			this.shaderContext.uGridPhySize.value = new Vector3(size.x, size.y, size.z);
 			this.shaderContext.grid.phy.texel.value = new Vector3(1, 1, 1).divide(size);
+			this.shaderContext.grid.phy.worldTexelSizeX2.value = this.shaderContext.uVolumeWorldSize.value
+				.clone()
+				.divide(this.shaderContext.uGridPhySize.value)
+				.multiplyScalar(2);
 			computeShaders = computeTheShaders("phy", true);
 		};
 
@@ -1162,6 +1184,7 @@ export class EasyFire extends Object3D {
 			case "tier2":
 				this.config.colors.byTemperature.tier2.color = value;
 				colors[2] = value;
+				console.log("SET TIER #2 color", value);
 				break;
 			case "tier3":
 				this.config.colors.byTemperature.tier3.color = value;
@@ -1223,9 +1246,9 @@ export class EasyFire extends Object3D {
 		return {
 			resolution: this.volumetricPass!.getResolutionScale(),
 			grid: {
-				world: this.shaderContext.uVolumeWorldSize.value,
-				dye: this.shaderContext.uGridDyeSize.value,
-				phy: this.shaderContext.uGridPhySize.value,
+				world: this.shaderContext.uVolumeWorldSize.value as Vector3Like,
+				dye: this.shaderContext.uGridDyeSize.value as Vector3Like,
+				phy: this.shaderContext.uGridPhySize.value as Vector3Like,
 			},
 			vorticityConfinementStrength: this.vorticityConfinementStrength,
 			blurStrength: this.blurStrength,
@@ -1246,11 +1269,11 @@ export class EasyFire extends Object3D {
 			smokeWeight: this.smokeWeight,
 			pressureIterations: this.pressureIterations,
 			curlNoiseMultiplier: this.curlNoiseMultiplier,
-			colorBase: this.getColor("base").toJSON(),
-			colorTier1: this.getColor("tier1").toJSON(),
-			colorTier2: this.getColor("tier2").toJSON(),
-			colorTier3: this.getColor("tier3").toJSON(),
-			colorSpecial: this.getColor("special").toJSON(),
+			colorBase: "#" + this.getColor("base").getHexString(),
+			colorTier1: "#" + this.getColor("tier1").getHexString(),
+			colorTier2: "#" + this.getColor("tier2").getHexString(),
+			colorTier3: "#" + this.getColor("tier3").getHexString(),
+			colorSpecial: "#" + this.getColor("special").getHexString(),
 
 			colorRadianceMultiplier: this.colorRadianceMultiplier,
 
@@ -1268,7 +1291,7 @@ export class EasyFire extends Object3D {
 	/**
 	 * Apply a settings snapshot to the fire simulation
 	 */
-	applySettingsSnapshot(snapshot: ReturnType<typeof this.getSettingsSnapshot>) {
+	applySettingsSnapshot(snapshot: ReturnType<typeof this.getSettingsSnapshot> & InspectorProps) {
 		this.vorticityConfinementStrength = snapshot.vorticityConfinementStrength;
 		this.volumetricPass!.setResolutionScale(snapshot.resolution);
 		this.config.steps = snapshot.steps;
@@ -1290,11 +1313,11 @@ export class EasyFire extends Object3D {
 		this.curlNoiseMultiplier = snapshot.curlNoiseMultiplier;
 		this.blurStrength = snapshot.blurStrength;
 		this.angularVelocityMultiplier = snapshot.angularVelocityMultiplier;
-		this.setColor("base", new Color().setHex(snapshot.colorBase));
-		this.setColor("tier1", new Color().setHex(snapshot.colorTier1));
-		this.setColor("tier2", new Color().setHex(snapshot.colorTier2));
-		this.setColor("tier3", new Color().setHex(snapshot.colorTier3));
-		this.setColor("special", new Color().setHex(snapshot.colorSpecial));
+		this.setColor("base", new Color().set(snapshot.colorBase));
+		this.setColor("tier1", new Color().set(snapshot.colorTier1));
+		this.setColor("tier2", new Color().set(snapshot.colorTier2));
+		this.setColor("tier3", new Color().set(snapshot.colorTier3));
+		this.setColor("special", new Color().set(snapshot.colorSpecial));
 		this.setColorStop("tier1", snapshot.tier1Stop);
 		this.setColorStop("tier2", snapshot.tier2Stop);
 		this.setColorStop("tier3", snapshot.tier3Stop);
@@ -1331,12 +1354,23 @@ export class EasyFire extends Object3D {
 
 		const loadSnapshot = (snapshot: any) => {
 			this.applySettingsSnapshot(snapshot);
-			baseSize.world.copy(this.shaderContext.uVolumeWorldSize.value);
-			baseSize.phy.copy(this.shaderContext.uGridPhySize.value);
-			baseSize.dye.copy(this.shaderContext.uGridDyeSize.value);
-			scale.dye = snapshot.scale.dye ?? 1;
-			scale.phy = snapshot.scale.phy ?? 1;
-			scale.world = snapshot.scale.world ?? 1;
+
+			if (snapshot.inspector) {
+				baseSize.world.copy(snapshot.inspector.baseSize.world as Vector3Like);
+				baseSize.phy.copy(snapshot.inspector.baseSize.phy as Vector3Like);
+				baseSize.dye.copy(snapshot.inspector.baseSize.dye as Vector3Like);
+				scale.dye = snapshot.inspector.scale.dye ?? 1;
+				scale.phy = snapshot.inspector.scale.phy ?? 1;
+				scale.world = snapshot.inspector.scale.world ?? 1;
+			} else {
+				baseSize.world.copy(snapshot.grid.world);
+				baseSize.phy.copy(snapshot.grid.phy);
+				baseSize.dye.copy(snapshot.grid.dye);
+				scale.dye = 1;
+				scale.phy = 1;
+				scale.world = 1;
+			}
+
 			applyScale();
 		};
 
@@ -1363,7 +1397,10 @@ export class EasyFire extends Object3D {
 		const getSnapshot = () => {
 			return {
 				...this.getSettingsSnapshot(),
-				scale,
+				inspector: {
+					scale,
+					baseSize,
+				},
 			};
 		};
 
@@ -1387,6 +1424,8 @@ export class EasyFire extends Object3D {
 			saveToFile: () => {
 				//save to a json
 				const payload = getSnapshot();
+				payload.grid = baseSize; //because grid from getSnapshot will return the current possibly scaled grid size.
+
 				const blob = new Blob([JSON.stringify(payload, undefined, 2)], { type: "application/json" });
 				const url = URL.createObjectURL(blob);
 				const a = document.createElement("a");
@@ -1433,34 +1472,6 @@ export class EasyFire extends Object3D {
 		let scaleGizmo = new Mesh(new BoxGeometry(), new MeshBasicMaterial({ color: "yellow", wireframe: true }));
 		let timeout: number = 0;
 
-		gui.add(params.scale, "world", 0.25, 2, 0.05)
-			.onChange((value) => {
-				scale.world = value;
-				applyScale(true);
-
-				clearInterval(timeout);
-				scaleGizmo.scale.copy(baseSize.world).multiplyScalar(value);
-				this.add(scaleGizmo);
-				timeout = window.setTimeout(() => {
-					scaleGizmo.removeFromParent();
-				}, 500);
-			})
-			.name("World Scale");
-
-		gui.add(params.scale, "dye", 0.25, 2, 0.05)
-			.onChange((value) => {
-				scale.dye = value;
-				applyScale(true);
-			})
-			.name("Color Grid Scale");
-
-		gui.add(params.scale, "phy", 0.25, 2, 0.05)
-			.onChange((value) => {
-				scale.phy = value;
-				applyScale(true);
-			})
-			.name("Physics Grid Scale");
-
 		gui.add(params, "resolution", 0.1, 1.0, 0.05)
 			.onChange((value) => {
 				this.volumetricPass!.setResolutionScale(value);
@@ -1484,9 +1495,41 @@ export class EasyFire extends Object3D {
 			this.simulationSpeed = value;
 		});
 
+		const sizeSetting = gui.addFolder("Grid Size (Warning, unstable)");
 		const colFolder = gui.addFolder("Collision");
 		const fireControls = gui.addFolder("Fire");
 		const motionControls = gui.addFolder("Motion");
+
+		sizeSetting
+			.add(params.inspector.scale, "world", 0.25, 2, 0.05)
+			.onChange((value) => {
+				scale.world = value;
+				applyScale(true);
+
+				clearInterval(timeout);
+				scaleGizmo.scale.copy(baseSize.world).multiplyScalar(value);
+				this.add(scaleGizmo);
+				timeout = window.setTimeout(() => {
+					scaleGizmo.removeFromParent();
+				}, 500);
+			})
+			.name("World Scale");
+
+		sizeSetting
+			.add(params.inspector.scale, "dye", 0.25, 2, 0.05)
+			.onChange((value) => {
+				scale.dye = value;
+				applyScale(true);
+			})
+			.name("Color Grid Scale");
+
+		sizeSetting
+			.add(params.inspector.scale, "phy", 0.25, 2, 0.05)
+			.onChange((value) => {
+				scale.phy = value;
+				applyScale(true);
+			})
+			.name("Physics Grid Scale");
 
 		motionControls
 			.add(params, "vorticityConfinementStrength", 0, 15, 0.01)
@@ -1506,7 +1549,7 @@ export class EasyFire extends Object3D {
 			this.temperature = value;
 		});
 
-		fireControls.add(params, "fireDensity", 0.0, 4, 0.001).onChange((value) => {
+		fireControls.add(params, "fireDensity", 0.0, 0.3, 0.001).onChange((value) => {
 			this.fireDensity = value;
 		});
 

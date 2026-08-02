@@ -20,12 +20,12 @@ export const advectDyePass =
 		const prevPos = uvw.sub(velUVW.mul(context.uDt)).toVar();
 
 		// check if the prev pos is inside a collider....
-		const localPos = uvw.sub(0.5).mul(context.uVolumeWorldSize);
+		const localPos = prevPos.sub(0.5).mul(context.uVolumeWorldSize);
 		const worldPos = context.worldMatrix.mul(localPos).xyz;
-		const prevDist = context.collisions.distanceAtPoint(uvw).toVar();
+		const prevDist = context.collisions.distanceAtPoint(prevPos).toVar();
 		// If the source position came from inside an object, push it back to the surface
 		If(prevDist.lessThan(0.0), () => {
-			const normal = context.collisions.normalAtPoint(uvw);
+			const normal = context.collisions.normalAtPoint(prevPos);
 			// Move the sampling point out of the obstacle along the normal
 			// prevPos is uvw...
 			// 1. Move world position out of the obstacle along the normal

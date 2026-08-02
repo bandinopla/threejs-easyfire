@@ -2,7 +2,7 @@ import { Color, DoubleSide, HemisphereLight, Mesh, Object3D, Scene, SpotLight } 
 import { MeshPhysicalNodeMaterial, MeshStandardNodeMaterial, PerspectiveCamera, RenderPipeline } from "three/webgpu";
 import { WebGPURenderer } from "three/webgpu";
 import { GLTFLoader, OrbitControls, TeapotGeometry } from "three/examples/jsm/Addons.js";
-import { color, Fn, mix, pass, uv } from "three/tsl";
+import { color, Fn, mix, pass, uv, vec3 } from "three/tsl";
 import { EasyFire } from "threejs-easyfire";
 import { Inspector } from "three/examples/jsm/inspector/Inspector.js";
 import { bloom } from "three/examples/jsm/tsl/display/BloomNode.js";
@@ -31,7 +31,7 @@ export async function demo(scene: Scene, camera: PerspectiveCamera, renderer: We
 
 	scene.background = new Color("#000000");
 
-	const spotLight = new SpotLight(0xffffff, 11);
+	const spotLight = new SpotLight(0xffffff, 5);
 	spotLight.position.set(2, 1, 6);
 	spotLight.angle = Math.PI / 1;
 	spotLight.penumbra = 1;
@@ -76,7 +76,7 @@ export async function demo(scene: Scene, camera: PerspectiveCamera, renderer: We
 	});
 
 	const collidersMaterial = new MeshPhysicalNodeMaterial({
-		colorNode: color("black"),
+		colorNode: color("#222222"),
 		roughness: 1,
 		metalness: 0,
 	});
@@ -127,18 +127,18 @@ export async function demo(scene: Scene, camera: PerspectiveCamera, renderer: We
 
 	fire.material = new MeshStandardNodeMaterial({
 		color: "#222222",
-		wireframe: true,
+		//wireframe: true,
 	});
 	fire.add(
 		myFire.getFireFor("fireryThings", {
-			emitMultiplier: 13,
+			emitMultiplier: 21,
 			tintFactor: 0,
 		})!,
 	);
 
 	teapot.add(
 		myFire.getFireFor("teapot", {
-			emitMultiplier: 22,
+			emitMultiplier: 11,
 			tintFactor: 1,
 		})!,
 	);
@@ -168,26 +168,40 @@ export async function demo(scene: Scene, camera: PerspectiveCamera, renderer: We
 	const fireScene = myFire.getRenderPass(scene, camera, sceneDepth).toInspector("fire scene");
 	const scenePassColor = scenePass.add(fireScene);
 
-	renderPipeline.outputNode = scenePassColor.add(bloom(fireScene, 0.01, 0.1, 13).setResolutionScale(0.5));
-
-	myFire.addSettingsToInspector(renderer.inspector as Inspector, "Easy fire");
+	renderPipeline.outputNode = scenePassColor.add(bloom(fireScene, 0.001, 0.01, 13).setResolutionScale(0.5));
 
 	//---------------------------------------------------------
 	myFire.applySettingsSnapshot({
 		resolution: 0.75,
-		vorticityConfinementStrength: 7.01,
-		vertexEmissionRadius: 0,
+		grid: {
+			world: {
+				x: 7.62003755569458,
+				y: 5.97511625289917,
+				z: 3.7697033882141113,
+			},
+			dye: {
+				x: 100,
+				y: 78,
+				z: 49,
+			},
+			phy: {
+				x: 56,
+				y: 45,
+				z: 28,
+			},
+		},
+		vorticityConfinementStrength: 11.87,
 		blurStrength: 0,
 		steps: 22,
 		simulationSpeed: 1.5,
-		temperature: 8.5,
-		fireDensity: 0.644,
+		temperature: 12,
+		fireDensity: 0.031,
 		turbulenceFrecuency: 6.81,
 		turbulenceDecay: 0.76,
 		turbulence: 0.2,
 		friction: 0.9,
 		angularVelocityMultiplier: 1.36,
-		collisionMargin: 0.034,
+		collisionMargin: 0.059,
 		densityDissipation: 1.02,
 		cooling: 0.4831,
 		velocityDamping: 0.25,
@@ -195,27 +209,54 @@ export async function demo(scene: Scene, camera: PerspectiveCamera, renderer: We
 		smokeWeight: 0.15,
 		pressureIterations: 4,
 		curlNoiseMultiplier: 5.82,
-		colorBase: 0,
-		colorTier1: 16734464,
-		colorTier2: 16777068,
-		colorTier3: 16777215,
-		colorSpecial: 65535,
-		colorRadianceMultiplier: 14.78,
+		colorBase: "#878787",
+		colorTier1: "#ff0000",
+		colorTier2: "#ff7b00",
+		colorTier3: "#ffffff",
+		colorSpecial: "#006eff",
+		colorRadianceMultiplier: 78.39,
 		tier1Stop: {
 			from: 0.01,
-			to: 0.1,
+			to: 0.27,
 		},
 		tier2Stop: {
-			from: 0.3,
-			to: 0.5,
+			from: 0.34,
+			to: 0.8675,
 		},
 		tier3Stop: {
-			from: 0.7,
-			to: 0.8,
+			from: 0.96,
+			to: 1,
 		},
 		temperatureAtMaxColor: 10,
-		timestamp: "2026-07-30T16:35:28.278Z",
+		specialColorMultiplier: 5.5,
+		timestamp: "2026-08-02T17:14:38.758Z",
+		inspector: {
+			scale: {
+				world: 1,
+				phy: 1,
+				dye: 1,
+			},
+			baseSize: {
+				world: {
+					x: 7.62003755569458,
+					y: 5.97511625289917,
+					z: 3.7697033882141113,
+				},
+				phy: {
+					x: 56,
+					y: 45,
+					z: 28,
+				},
+				dye: {
+					x: 100,
+					y: 78,
+					z: 49,
+				},
+			},
+		},
 	});
+
+	myFire.addSettingsToInspector(renderer.inspector as Inspector, "Easy fire");
 
 	return (delta: number) => {
 		teapot.rotateZ(delta);

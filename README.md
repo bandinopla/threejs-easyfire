@@ -161,6 +161,8 @@ And vía the buttons provided there, download the json settins or copy them to c
 ## Grid Sizes
 The volume has 2 voxel grids, the render grid and the physics grid, they have different purposes. When you see "voxel units" it means how many times the world volume will be sliced. 
 
+> WARNING: I still feel these methods are unstable, the simulation behaves diferently depending on the size of the voxels, obviously, so yeah, if you reduce the voxels too much it will act weird and explode or if there are too many too tiny they will be hard to notice unless you increase temperature and touch the settings again. Just a heads up.
+
 - **renderResolution**: in voxel units. Determines the detail of the fire, higher values = more detail.
 - **physicsResolution**: in voxel units. Determines the resolution of the simulation (buoyancy, vorticity, etc), higher values = more accurate simulation.
 You can programatically change the size ( but remember this will dispose the old textures and create new textures )

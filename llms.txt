@@ -48,6 +48,18 @@ myFire.setNoiseGridResolution(64); //64x64x64
 ## Textures used
 Read `shader_textures_usage.md` to see what textures are used and how.
 
+## Advection method
+By default `SemiLagrangian` is used which produces ok results, the other option is `MacCormack` that costs more but look way better.
+```js
+import { EasyFire, AdvectionMethod } from "threejs-easyfire";
+const myFire = new EasyFire(renderer, {
+	//...  
+	advectionMethod: AdvectionMethod.MacCormack, //heavyer but looks better
+	advectionMethod: AdvectionMethod.SemiLagrangian, //faster (default)
+	//...
+});
+```
+
 ## Proxy objects
 the library interfaces with you via proxy objects. These are simple Object3D that you can move and animate. Once thing to have in mind, the system uses it's matrixWorld to calculate the position relative to the simulation local space and the colliders that use them to render theyr SDF shapes always assume they are a non-uniformally scaled 1:1:1 box. So the scale of the collider's proxy object is what is used to calculate the AABB of the SDF shape.
 

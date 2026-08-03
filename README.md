@@ -3,7 +3,11 @@
 # Easy Fire
 > Based on the [Three.js](https://threejs.org/) example "[Volumetric Fire](https://github.com/mrdoob/three.js/blob/master/examples/webgpu_volume_fire.html)" by [sunag](https://github.com/sunag). 
 
-My motivation to make this module is to make adding fire something a bit easyer so the basics are somewhat covered and you can focus on the layers on top adding your artistic imprint. This fire class offers ways to edit the fire and extend it, so it serves as a very nice base to build on top of.
+## What is this?
+It is a [Three.js TSL WebGPU](https://threejs.org/) module to render an Eulerian fire simulation via [Raymarching](https://en.wikipedia.org/wiki/Ray_marching) using a [VolumeNodeMaterial](https://threejs.org/docs/?q=VolumeN#VolumeNodeMaterial) using either [Lagrangian](https://en.wikipedia.org/wiki/Lagrangian%E2%80%93Eulerian_advection) or [MacCormack ](https://en.wikipedia.org/wiki/MacCormack_method) (MacCormack semi-Lagrangian advection with a GPU-adapted continuous limiter...) methods for advection.
+
+## Motivation
+To make this module is to make adding fire something a bit easyer so the basics are somewhat covered and you can focus on the layers on top adding your artistic imprint. This fire class offers ways to edit the fire and extend it, so it serves as a very nice base to build on top of.
 
 #### > Talk with the docs (+audio): [Gemini Notebook](https://notebook.google.com/notebook/2cc20d63-0ac7-4e18-880c-ce4545f1c2d7)
 
@@ -65,6 +69,19 @@ const myFire = new EasyFire(renderer, {
 
 scene.add(myFire); //<--- Don't forget to add the volume to your scene.
 ```
+
+## Advection method
+By default `SemiLagrangian` is used which produces ok results, the other option is `MacCormack` that costs more but look way better.
+```js
+import { EasyFire, AdvectionMethod } from "threejs-easyfire";
+const myFire = new EasyFire(renderer, {
+	//...  
+	advectionMethod: AdvectionMethod.MacCormack, //heavyer but looks better
+	advectionMethod: AdvectionMethod.SemiLagrangian, //faster (default)
+	//...
+});
+```
+![Advection method](vs.jpg)
 
 ## Set on fire
 ```js

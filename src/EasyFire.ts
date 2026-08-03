@@ -77,7 +77,7 @@ import {
 import { EmitterManager, EmitterObjectDef, EmitterOptions } from "./EmitterManager";
 import { createStorage3D } from "./util/createStorage3D";
 import { bayer16 } from "three/examples/jsm/tsl/math/Bayer.js";
-import { DataTexture, EasyFireShaderContext, NoiseTextureConfig } from "./EasyFireShaderContext";
+import { DataTexture, EasyFireShaderContext, makeDataTexture, NoiseTextureConfig } from "./EasyFireShaderContext";
 import { curlNoisePass } from "./pass/curlNoisePass";
 import { advectVelocityPass } from "./pass/advectVelocityPass";
 import { divergencePass } from "./pass/divergencePass";
@@ -92,7 +92,12 @@ import { openStopsModal } from "./util/openStopsModal";
 import { CollisionHandler, CollisionHandlerConfig } from "./sdf/CollisionHandler";
 import { BasicShapes } from "./sdf/shape/SDFShape";
 import { vorticityPass } from "./pass/vorticityPass";
+import { MacCormackAdvection } from "./pass/advectDyeMacCormackPass";
 
+export enum AdvectionMethod {
+	SemiLagrangian,
+	MacCormack,
+}
 export type FireColorStopType = "tier1" | "tier2" | "tier3";
 export type FireColorType = "base" | FireColorStopType | "special";
 type InspectorProps = {
@@ -116,6 +121,16 @@ export type TemperatureColor = {
 };
 
 export type EasyFireConfig = {
+	/**
+	 * Advection method to be used for the dye ( temperature, density... )
+	 *
+	 * The MacCormak looks better but costs 1 extra texture the same size as the renderResolution + 1 extra shader pass.
+	 *
+	 * @see https://en.wikipedia.org/wiki/Lagrangian%E2%80%93Eulerian_advection
+	 * @see https://en.wikipedia.org/wiki/MacCormack_method
+	 */
+	dyeAdvectionMethod: AdvectionMethod;
+
 	debug: {
 		renderColliders?: boolean;
 		renderVolumeBox?: boolean;
@@ -270,6 +285,7 @@ export class EasyFire extends Object3D {
 		super();
 
 		const cfg: EasyFireConfig = {
+			dyeAdvectionMethod: AdvectionMethod.SemiLagrangian,
 			debug: { renderColliders: false, renderVolumeBox: false, noise: false },
 			renderLayer: 10,
 			size: {
@@ -395,6 +411,7 @@ export class EasyFire extends Object3D {
 			},
 			noiseTextureConfig: cfg.noise,
 			collisions: this.collisions,
+			advectionMethod: cfg.dyeAdvectionMethod,
 		});
 
 		const textures = {
@@ -409,6 +426,7 @@ export class EasyFire extends Object3D {
 			vorticity: this.shaderContext.texture.vorticity,
 			sdf: this.shaderContext.texture.sdf,
 			sdfVelocities: this.shaderContext.texture.sdfVelocities,
+			dyeHat: this.shaderContext.texture.dye.Hat!,
 		};
 
 		//
@@ -553,6 +571,27 @@ export class EasyFire extends Object3D {
 				}),
 			),
 
+			macCormackPredictionPass: inBoundsRun(
+				"MacCormackPrediction",
+				this.shaderContext.uGridDyeSize,
+				MacCormackAdvection.predictor(this.shaderContext, {
+					velocity: textures.velA,
+					dyeIn: textures.dyeA,
+					dyeHatOut: textures.dyeHat, //velV is not used until the next advectPass that writes to it.
+				}),
+			),
+
+			macCormackCorrectionPass: inBoundsRun(
+				"MacCormackCorrection",
+				this.shaderContext.uGridDyeSize,
+				MacCormackAdvection.corrector(this.shaderContext, {
+					velocity: textures.velA,
+					dyeOld: textures.dyeA,
+					dyeHat: textures.dyeHat,
+					dyeOut: textures.dyeB,
+				}),
+			),
+
 			objectsPassCompute: this.objectsManager
 				.computeNodePerVertex(
 					emitObjectPassFragment(this.shaderContext, {
@@ -664,11 +703,23 @@ export class EasyFire extends Object3D {
 				if (resizeTextures) {
 					textures.dyeA.resize(dye);
 					textures.dyeB.resize(dye);
+					if (this.config.dyeAdvectionMethod == AdvectionMethod.MacCormack) {
+						textures.dyeHat.resize(dye);
+					}
 				}
 
-				out.advectDyeCompute = shaders.advectDyeCompute
-					.compute(DYE_DISPATCH as any, WORKGROUP_3D)
-					.setName("advectDyeCompute");
+				if (this.config.dyeAdvectionMethod == AdvectionMethod.SemiLagrangian) {
+					out.advectDyeCompute = shaders.advectDyeCompute
+						.compute(DYE_DISPATCH as any, WORKGROUP_3D)
+						.setName("advectDyeCompute");
+				} else {
+					out.macCormackPredictionPass = shaders.macCormackPredictionPass
+						.compute(DYE_DISPATCH as any, WORKGROUP_3D)
+						.setName("macCormackPredictionPass");
+					out.macCormackCorrectionPass = shaders.macCormackCorrectionPass
+						.compute(DYE_DISPATCH as any, WORKGROUP_3D)
+						.setName("macCormackCorrectionPass");
+				}
 
 				out.objectsPassCompute = this.objectsManager
 					.computeNodePerVertex(
@@ -971,7 +1022,14 @@ export class EasyFire extends Object3D {
 						}
 
 						renderer.compute(computeShaders.projectCompute); // read vel.B(RGB) + pressureA(R) -> vel.A(RGB)
-						renderer.compute(computeShaders.advectDyeCompute); // read: vel.A(RGB) + dye.A(RGBA) -> dye.B(RGBA)
+
+						if (this.config.dyeAdvectionMethod == AdvectionMethod.SemiLagrangian) {
+							renderer.compute(computeShaders.advectDyeCompute); // read: vel.A(RGB) + dye.A(RGBA) -> dye.B(RGBA)
+						} else {
+							renderer.compute(computeShaders.macCormackPredictionPass);
+							renderer.compute(computeShaders.macCormackCorrectionPass);
+						}
+
 						renderer.compute(computeShaders.objectsPassCompute); // read: dye.A(RGBA) -> dye.B(RGBA)
 
 						this.shaderContext.texture.dye.swap();

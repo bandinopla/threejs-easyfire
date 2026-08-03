@@ -1,2 +1,2 @@
 export * from "./sdf/shape/SDFShape";
-export { EasyFire } from "./EasyFire";
+export { EasyFire, AdvectionMethod } from "./EasyFire";

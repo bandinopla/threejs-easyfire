@@ -1,6 +1,6 @@
 {
 	"name": "threejs-easyfire",
-	"version": "0.1.6",
+	"version": "0.1.7",
 	"main": "dist/threejs-easyfire.js",
 	"module": "dist/threejs-easyfire.js",
 	"devDependencies": {

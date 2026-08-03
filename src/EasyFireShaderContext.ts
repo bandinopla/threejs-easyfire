@@ -47,7 +47,7 @@ import {
 import { createStorage3D } from "./util/createStorage3D";
 import { snoise } from "three/examples/jsm/tsl/math/curlNoise.js";
 import { CollisionHandler } from "./sdf/CollisionHandler";
-import { mx_bilerp_1 } from "three/src/nodes/materialx/lib/mx_noise.js";
+import { AdvectionMethod } from "./EasyFire";
 
 const getVoxelCoord = (id: IndexNode, size: Vector3Like) => {
 	const x = id.mod(size.x);
@@ -84,7 +84,7 @@ export type DataTexture = {
 	resize(size: number): void;
 };
 
-function makeDataTexture(
+export function makeDataTexture(
 	name: string,
 	size: Vector3Like,
 	config?: { wrap?: Wrapping; format?: AnyPixelFormat; writeOnly?: boolean; dataType?: TextureDataType },
@@ -244,6 +244,7 @@ export class EasyFireShaderContext {
 			A: DataTexture;
 			B: DataTexture;
 			swap(): void;
+			Hat?: DataTexture;
 		};
 		divergence: DataTexture;
 		press: {
@@ -271,6 +272,7 @@ export class EasyFireShaderContext {
 		};
 		noiseTextureConfig: NoiseTextureConfig;
 		collisions: CollisionHandler;
+		advectionMethod: AdvectionMethod;
 	}) {
 		this.noiseTextureConfig = config.noiseTextureConfig;
 		this.collisions = config.collisions;
@@ -333,6 +335,10 @@ export class EasyFireShaderContext {
 					this.A.setTexture(this.B.getTexture());
 					this.B.setTexture(tmp);
 				},
+				Hat:
+					config.advectionMethod == AdvectionMethod.MacCormack
+						? makeDataTexture("dyeHat", config.grid.dye)
+						: undefined,
 			},
 			divergence: makeDataTexture("divergence", config.grid.phy, { format: RedFormat }),
 			press: {

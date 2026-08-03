@@ -3,7 +3,7 @@ import { MeshPhysicalNodeMaterial, MeshStandardNodeMaterial, PerspectiveCamera, 
 import { WebGPURenderer } from "three/webgpu";
 import { GLTFLoader, OrbitControls, TeapotGeometry } from "three/examples/jsm/Addons.js";
 import { color, Fn, mix, pass, uv, vec3 } from "three/tsl";
-import { EasyFire } from "threejs-easyfire";
+import { AdvectionMethod, EasyFire } from "threejs-easyfire";
 import { Inspector } from "three/examples/jsm/inspector/Inspector.js";
 import { bloom } from "three/examples/jsm/tsl/display/BloomNode.js";
 
@@ -92,6 +92,10 @@ export async function demo(scene: Scene, camera: PerspectiveCamera, renderer: We
 	scene.getObjectByName("teapot")!.add(teapot);
 
 	const myFire = new EasyFire(renderer, {
+		dyeAdvectionMethod:
+			window.location.hash.indexOf("#maccormack") > -1
+				? AdvectionMethod.MacCormack
+				: AdvectionMethod.SemiLagrangian,
 		renderLayer: LAYER_VOLUMETRIC_LIGHTING,
 		size: {
 			boundingBox: fullSize,
@@ -256,7 +260,24 @@ export async function demo(scene: Scene, camera: PerspectiveCamera, renderer: We
 		},
 	});
 
-	myFire.addSettingsToInspector(renderer.inspector as Inspector, "Easy fire");
+	const inspector = renderer.inspector as Inspector;
+
+	const method = inspector.createParameters("Advection Method");
+
+	const methods = {
+		semiLagrangian: () => window.open("./", "_self"),
+		maccormack: () => {
+			//force reload
+			window.location.href = "./#maccormack";
+			window.location.reload();
+			//window.open("./#maccormack", "_self")
+		},
+	};
+
+	method.add(methods, "semiLagrangian");
+	method.add(methods, "maccormack");
+
+	myFire.addSettingsToInspector(inspector, "Easy fire");
 
 	return (delta: number) => {
 		teapot.rotateZ(delta);
